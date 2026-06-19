@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>立直麻将训练与测评</title>
+    <link rel="stylesheet" href="/styles.css?v=20260619-practice-v4" />
+  </head>
+  <body class="user-app portal-app">
+    <main class="shell">
+      <section class="hero portal-hero">
+        <p class="eyebrow">Riichi Training & Assessment</p>
+        <h1>立直麻将训练与测评</h1>
+        <p class="hero-sub">当前开放练习模式。考试模式可由管理员在题目编排完成后开放。</p>
+        <div class="badge-row">
+          <span class="badge">无需实名</span>
+          <span class="badge">不限时练习</span>
+          <span class="badge">即时判定</span>
+        </div>
+      </section>
+
+      <section class="mode-grid" aria-label="模式选择">
+        <article class="mode-card mode-card-active">
+          <p class="eyebrow">Practice</p>
+          <h2>练习模式</h2>
+          <p>直接点击牌面作答。首轮只出现非争议题，不能回退或修改已经提交的答案。</p>
+          <a class="primary-btn big-btn mode-link" href="/practice">进入练习</a>
+        </article>
+        <article class="mode-card mode-card-locked" id="examCard">
+          <p class="eyebrow">Assessment</p>
+          <h2>自适应考试</h2>
+          <p id="examStatus">题目仍在编排，暂未开放。</p>
+          <a class="ghost-btn big-btn mode-link is-disabled" id="examLink" aria-disabled="true">暂未开放</a>
+        </article>
+      </section>
+
+      <section class="panel portal-profile">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">练习身份</p>
+            <h2 id="displayNickname">正在载入…</h2>
+          </div>
+          <span class="badge" id="nicknameState">匿名身份</span>
+        </div>
+        <p class="muted-line">可设置一个昵称用于上榜（2–16 字，请勿填写真实姓名等个人信息）。本轮设置后通常不可再改，完成一轮练习后可再次更换。</p>
+        <div class="nickname-row" id="nicknameRow">
+          <input id="nicknameInput" maxlength="16" placeholder="设置昵称（可选）" autocomplete="off" />
+          <button id="nicknameSaveBtn" class="primary-btn" type="button">保存昵称</button>
+        </div>
+        <p id="nicknameMsg" class="message"></p>
+      </section>
+
+      <section class="panel privacy-panel">
+        <h3>数据与身份说明</h3>
+        <p>系统不要求实名，也不收集真实姓名。为维持匿名身份、减少重复记录并进行数据质量清洗，会记录必要的设备、浏览器、网络摘要和作答时间信息。</p>
+      </section>
+    </main>
+    <script src="/portal.js?v=20260619-practice-v4"></script>
+    <script src="/fp.js?v=20260617-security-a"></script>
+  </body>
+</html>

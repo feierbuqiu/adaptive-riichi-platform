@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>打牌式答题 Demo · SVG 牌面</title>
+  <link rel="stylesheet" href="/realstyles.css" />
+  <style>
+    /* 始终预留滚动条宽度：滚动条出现/消失时页面宽度不变，杜绝左右抖动 */
+    html { scrollbar-gutter: stable; overflow-y: scroll; }
+    .preview-note { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+    .demo-banner {
+      background: var(--soft-gold); border: 1px solid #ecdcb4; border-radius: 12px;
+      padding: 10px 14px; margin: 0 0 14px; font-size: 13.5px; line-height: 1.6; color: #6b4f17;
+    }
+    .demo-banner b { color: #4d3a10; }
+
+    /* ① 场况：背景框 + 放大字号 */
+    .situation-bar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px;
+      background: linear-gradient(180deg, #ffffff, #eef5f1);
+      border: 1px solid var(--line); border-left: 5px solid var(--accent);
+      border-radius: 12px; padding: 12px 16px; margin: 0 0 14px; box-shadow: var(--shadow-soft);
+    }
+    .situation-bar .sb-label { font-weight: 900; color: var(--accent-dark); font-size: 15px; margin-right: 2px; }
+    .meta-chip { display: inline-flex; align-items: baseline; gap: 6px; font-weight: 800; color: var(--ink); font-size: 16px; }
+    .meta-chip .k { color: var(--muted); font-weight: 700; font-size: 13px; }
+    .meta-chip .wind { color: var(--accent); font-weight: 900; font-size: 18px; }
+    .meta-chip.extra { font-size: 14px; color: var(--accent-dark); background: var(--soft-green); padding: 3px 10px; border-radius: 999px; }
+
+    /* ② 宝牌指示牌：共 5 张（第 1 张=指示牌，右 4 背）；保留区块标签 */
+    .dora-wrap { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; }
+    .dora-label { font-size: 12.5px; color: var(--muted); font-weight: 800; line-height: 1.3; }
+    .dora-tiles { display: flex; align-items: flex-end; gap: 2px; background: #20342b; border-radius: 8px; padding: 8px 10px; box-shadow: inset 0 2px 8px rgba(0,0,0,.32); }
+    .dora-tiles img { display: block; }
+
+    /* ③ 牌桌：去白框；立直/暗杠按钮放进墨绿区右上；填色白字、偏方矩形 */
+    .mjhand-tray {
+      position: relative; display: flex; flex-direction: column;
+      background: linear-gradient(180deg, #1d6b4f 0%, #11402f 100%);
+      border-radius: 14px; padding: 12px 14px 16px; box-shadow: inset 0 3px 16px rgba(0, 0, 0, .42);
+    }
+    .tray-actions { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 6px; }
+    .decl-btn {
+      font: inherit; font-weight: 800; font-size: 14px; padding: 7px 18px; border: none; border-radius: 6px;
+      color: #fff; cursor: pointer; transition: transform .14s ease, box-shadow .16s ease, filter .16s ease;
+    }
+    .riichi-btn { background: #ef8a2b; }
+    .kan-btn { background: #7b46d6; }
+    .decl-btn:hover { transform: translateY(-1px); filter: brightness(1.06); }
+    .decl-btn.is-on { box-shadow: inset 0 0 0 2.5px rgba(255,255,255,.9), 0 5px 14px rgba(0,0,0,.4); filter: brightness(.97); }
+
+    /* overflow-y:hidden 防止抬起的牌触发纵向滚动条；横向只在真的放不下时滚动 */
+    .hand-area { overflow-x: auto; overflow-y: hidden; padding-top: 24px; }
+    .hand-wrap { display: flex; align-items: flex-end; gap: 0; width: max-content; max-width: 100%; margin: 0 auto; }
+    .hand-left { display: flex; align-items: flex-end; }
+    .mjhand-set { display: flex; align-items: flex-end; }
+    .mjhand-draw { display: flex; align-items: flex-end; }     /* 自摸：只靠间距区分，无文字 */
+
+    /* 可点击的牌（盒子=牌面，高亮贴轮廓） */
+    .seltile {
+      width: var(--hw, 40px); aspect-ratio: 320 / 446;
+      border: 0; background: none; padding: 0; margin: 0; cursor: pointer; position: relative; display: block;
+      transition: transform .15s cubic-bezier(.2,.85,.3,1.1), opacity .15s ease, filter .15s ease;
+    }
+    .seltile img { width: 100%; height: 100%; display: block; object-fit: contain; pointer-events: none;
+      filter: drop-shadow(0 3px 4px rgba(0,0,0,.28)); }
+    /* 仅在真正支持悬停的设备（鼠标）上抬起；触屏无 hover，避免点完“卡”在半抬起 */
+    @media (hover: hover) and (pointer: fine) { .seltile:hover { transform: translateY(-7px); } }
+    .seltile.sel { transform: translateY(-18px); z-index: 4; }
+    .seltile.sel::after { content: ""; position: absolute; inset: 0; border: 2.5px solid #ffc83c; border-radius: 7px;
+      box-shadow: 0 0 8px rgba(255,200,60,.5); pointer-events: none; }
+    .seltile.kan-on { transform: translateY(-12px); z-index: 3; }
+    .seltile.kan-on::after { content: ""; position: absolute; inset: 0; border: 2.5px solid #b794ff; border-radius: 7px;
+      box-shadow: 0 0 9px rgba(155,108,255,.6); pointer-events: none; }
+    .seltile.dim { opacity: .3; filter: grayscale(.72); }
+    .seltile.dim:hover { transform: none; }
+
+    /* 副露（无文字标签） */
+    .hand-melds { display: flex; align-items: flex-end; }
+    .meld { display: inline-flex; align-items: flex-end; gap: 0; margin-left: 14px; }
+    .meld-up img, .meld-rot img { display: block; filter: drop-shadow(0 3px 4px rgba(0,0,0,.28)); }
+    .meld-up img { width: var(--tw); height: var(--th); }
+    .meld-rot { position: relative; display: inline-block; vertical-align: bottom; width: var(--th); height: var(--tw); }
+    .meld-rot img { position: absolute; top: 0; left: 0; width: var(--tw); height: var(--th); transform-origin: top left; transform: rotate(90deg) translateY(-100%); }
+
+    /* 操作区 */
+    .below { display: flex; align-items: center; gap: 10px; margin: 14px 0 10px; }
+    .sel-info { color: var(--muted); font-weight: 700; font-size: 14.5px; }
+    .sel-info b { color: var(--ink); }
+    .qprogress { display: flex; gap: 6px; margin-left: auto; }
+    .qdot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+    .qdot.on { background: var(--accent); }
+    .confirm-btn { width: 100%; }
+
+    .board { animation: fadeUp .32s ease both; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+    @media (max-width: 600px) {
+      .mjhand-tray { padding: 12px 8px 14px; }
+      .meta-chip { font-size: 15px; } .meta-chip .wind { font-size: 17px; }
+    }
+  </style>
+</head>
+<body class="user-app">
+  <main class="shell">
+    <p class="preview-note">⟵ 「打牌式」答题 Demo（独立预览，复用线上 <code>styles.css</code>，<b>未接入线上</b>）。牌<b>本身就是选项</b>：点牌→抬起高亮→「确认」直接进入下一题。</p>
+
+    <section class="board" id="board">
+      <header class="test-header">
+        <div>
+          <p class="eyebrow">正式测试 · Demo</p>
+          <h2 id="qTitle">第 1 题</h2>
+        </div>
+        <div class="timer-box" id="timerBox">
+          <svg class="timer-ring" viewBox="0 0 100 100" aria-hidden="true">
+            <circle class="timer-ring-bg" cx="50" cy="50" r="44"></circle>
+            <circle class="timer-ring-fg" cx="50" cy="50" r="44" style="stroke-dashoffset:55"></circle>
+          </svg>
+          <div class="timer-ring-num"><span>58</span><small>秒</small></div>
+        </div>
+      </header>
+
+      <div class="demo-banner" id="demoBanner"></div>
+
+      <div class="situation-bar" id="situationBar"></div>
+
+      <div class="dora-wrap">
+        <div class="dora-label">宝牌<br />指示牌</div>
+        <div class="dora-tiles" id="doraTiles"></div>
+      </div>
+
+      <div class="mjhand-tray" id="tray">
+        <div class="tray-actions" id="declareRow" hidden>
+          <button id="riichiBtn" class="decl-btn riichi-btn" type="button" hidden>立直</button>
+          <button id="kanBtn" class="decl-btn kan-btn" type="button" hidden>暗杠</button>
+        </div>
+        <div class="hand-area" id="handArea">
+          <div class="hand-wrap" id="handWrap">
+            <div class="hand-left">
+              <div class="mjhand-set" id="setRow"></div>
+              <div class="mjhand-draw" id="drawRow"></div>
+            </div>
+            <div class="hand-melds" id="meldRow"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="below">
+        <span id="selInfo" class="sel-info">请点击你要切的牌</span>
+        <span class="qprogress" id="qProgress"></span>
+      </div>
+      <button id="confirmBtn" class="primary-btn big-btn confirm-btn" type="button" disabled>确认提交 →</button>
+    </section>
+  </main>
+
+  <script src="./tiles.js"></script>
+  <script>
+    /* 题目数据格式见 svg-tiles/SCHEMA.md。 */
+    var QUESTIONS = [
+      {
+        id: "Q01",
+        demo: "基础盘面：<b>场况 → 宝牌指示牌 → 手牌(含副露) + 自摸</b>。点牌抬起高亮，再「确认」直接下一题。手牌里的<b>赤5万(0m)</b>与普通5万分开显示。",
+        situation: { round: "东", kyoku: 1, honba: 0, seat: "东", turn: 6, extra: "已碰「中」，有役" },
+        dora: ["5m"],
+        melds: [{ type: "pon", tiles: ["7z", "7z", "7z"], from: "across" }],
+        concealed: ["3m", "4m", "0m", "6m", "7m", "8m", "2p", "3p", "9s", "9s"],
+        draw: "5s",
+        canRiichi: false,
+        answers: [{ action: "discard", tile: "5s", riichi: false }],
+        why: "3m4m5m·6m7m8m 已成，2p3p 搭子、9s9s 雀头，5s 孤张，切 5s 听 1p/4p。"
+      },
+      {
+        id: "Q02",
+        demo: "<b>同张等价 + 赤五区分 + 暗杠</b>：三张 5索 + 自摸<b>赤5索(0s)</b>。点「暗杠」后，不参与的牌变暗、四张 5索 高亮。",
+        situation: { round: "南", kyoku: 2, honba: 0, seat: "南", turn: 8, extra: "门清" },
+        dora: ["1z"],
+        melds: [],
+        concealed: ["5s", "5s", "5s", "2m", "3m", "4m", "6m", "7m", "8m", "3p", "4p", "9p", "9p"],
+        draw: "0s",
+        canRiichi: false,
+        answers: [{ action: "ankan", tile: "5s", riichi: false }],
+        why: "第四张 5索（自摸赤5）到手，暗杠可补岭上+新宝牌且不改听牌。暗杠≠普通切，赤5(0s)≠普通5。"
+      },
+      {
+        id: "Q03",
+        demo: "<b>门清听牌：立直 vs 默听</b>。选牌 + 橙色「立直」开关后其余变暗，再「确认」。",
+        situation: { round: "东", kyoku: 1, honba: 0, seat: "东", turn: 10, extra: "门清听牌" },
+        dora: ["2p"],
+        melds: [],
+        concealed: ["2m", "3m", "4m", "5m", "6m", "7m", "3p", "4p", "5p", "6p", "7p", "8s", "8s"],
+        draw: "1m",
+        canRiichi: true,
+        answers: [
+          { action: "discard", tile: "1m", riichi: true },
+          { action: "discard", tile: "4m", riichi: true },
+          { action: "discard", tile: "7m", riichi: true }
+        ],
+        why: "切 1m / 4m / 7m 均听 5p·8p（牌效等价，都接受）。门清下立直≠默听——本题价值不足应立直。"
+      }
+    ];
+
+    function baseKind(code) { var n = +code[0]; return (n === 0 ? 5 : n) + code[1]; }
+    function tileName(code) {
+      var n = +code[0], s = code[1];
+      if (s === "z") return ({ 1: "东", 2: "南", 3: "西", 4: "北", 5: "白", 6: "发", 7: "中" })[n];
+      var suit = { m: "万", p: "饼", s: "索" }[s];
+      return (n === 0 ? "赤5" : n) + suit;
+    }
+    function ansText(a, q) {
+      if (a.action === "ankan") return "暗杠 " + tileName(a.tile);
+      var pre = q.canRiichi ? (a.riichi ? "立直 + 切 " : "默听 切 ") : "切 ";
+      return pre + tileName(a.tile);
+    }
+    function ansEq(a, b) { return a.action === b.action && a.tile === b.tile && !!a.riichi === !!b.riichi; }
+    function rawImg(code) { return '<img src="' + MJTiles.src(code) + '" alt="' + code + '">'; }
+
+    // ---- 听牌判定（标准型 + 七对 + 国士），用于立直鉴权 ----
+    function tileIndex(code) { var n = +code[0]; if (n === 0) n = 5; return ({ m: 0, p: 9, s: 18, z: 27 })[code[1]] + (n - 1); }
+    function canFormMelds(cnt) {
+      var i = 0; while (i < 34 && cnt[i] === 0) i++;
+      if (i === 34) return true;
+      if (cnt[i] >= 3) { cnt[i] -= 3; if (canFormMelds(cnt)) { cnt[i] += 3; return true; } cnt[i] += 3; }
+      if (i < 27 && i % 9 <= 6 && cnt[i + 1] > 0 && cnt[i + 2] > 0) {
+        cnt[i]--; cnt[i + 1]--; cnt[i + 2]--;
+        if (canFormMelds(cnt)) { cnt[i]++; cnt[i + 1]++; cnt[i + 2]++; return true; }
+        cnt[i]++; cnt[i + 1]++; cnt[i + 2]++;
+      }
+      return false;
+    }
+    function isWin(cnt) {                       // 14 张是否和牌
+      for (var i = 0; i < 34; i++) { if (cnt[i] >= 2) { cnt[i] -= 2; var ok = canFormMelds(cnt); cnt[i] += 2; if (ok) return true; } }
+      var pairs = 0, types = 0; for (var j = 0; j < 34; j++) { if (cnt[j] > 0) { types++; if (cnt[j] === 2) pairs++; } }
+      if (types === 7 && pairs === 7) return true;                              // 七对子
+      var T = [0, 8, 9, 17, 18, 26, 27, 28, 29, 30, 31, 32, 33], all = true, pr = false, only = true;
+      for (var k = 0; k < 34; k++) { if (cnt[k] > 0 && T.indexOf(k) < 0) only = false; }
+      for (var t = 0; t < T.length; t++) { if (cnt[T[t]] === 0) all = false; if (cnt[T[t]] >= 2) pr = true; }
+      return only && all && pr;                                                // 国士无双
+    }
+    function isTenpai(codes) {                  // 13 张是否听牌
+      var cnt = new Array(34); for (var x = 0; x < 34; x++) cnt[x] = 0;
+      codes.forEach(function (c) { cnt[tileIndex(c)]++; });
+      for (var t = 0; t < 34; t++) { if (cnt[t] < 4) { cnt[t]++; var ok = isWin(cnt); cnt[t]--; if (ok) return true; } }
+      return false;
+    }
+    function validRiichiSet(all) {              // 返回“切掉后仍听牌”的下标集合
+      var set = {};
+      for (var i = 0; i < all.length; i++) {
+        if (isTenpai(all.slice(0, i).concat(all.slice(i + 1)))) set[i] = true;
+      }
+      return set;
+    }
+
+    var els = {
+      title: document.getElementById("qTitle"), banner: document.getElementById("demoBanner"),
+      sit: document.getElementById("situationBar"), dora: document.getElementById("doraTiles"),
+      set: document.getElementById("setRow"), draw: document.getElementById("drawRow"),
+      melds: document.getElementById("meldRow"), wrap: document.getElementById("handWrap"),
+      tray: document.getElementById("tray"), handArea: document.getElementById("handArea"),
+      declare: document.getElementById("declareRow"), riichi: document.getElementById("riichiBtn"), kan: document.getElementById("kanBtn"),
+      sel: document.getElementById("selInfo"), confirm: document.getElementById("confirmBtn"),
+      progress: document.getElementById("qProgress"), board: document.getElementById("board")
+    };
+
+    var qi = 0, state = null, _lastW = -1;
+    function tiles() { return els.wrap.querySelectorAll(".seltile"); }
+    function selectedCode() { return state.sel < 0 ? null : state.all[state.sel]; }
+    function ankanKinds() {
+      var c = {}; state.all.forEach(function (code) { var k = baseKind(code); c[k] = (c[k] || 0) + 1; });
+      return Object.keys(c).filter(function (k) { return c[k] >= 4; });
+    }
+
+    function meldHTML(meld, w) {
+      var mw = Math.round(w * 0.82), mh = Math.round(mw * 446 / 320);
+      var rot = meld.from === "left" ? 0 : meld.from === "right" ? meld.tiles.length - 1 : 1;
+      var inner = meld.tiles.map(function (c, i) {
+        return i === rot ? '<span class="meld-rot">' + rawImg(c) + "</span>" : '<span class="meld-up">' + rawImg(c) + "</span>";
+      }).join("");
+      return '<span class="meld" style="--tw:' + mw + "px;--th:" + mh + 'px">' + inner + "</span>";
+    }
+
+    function layout() {
+      if (!state) return;
+      var q = QUESTIONS[qi];
+      var narrow = window.innerWidth <= 600;
+      var drawGap = narrow ? 12 : 24, meldGap = narrow ? 14 : 34;
+      var inner = els.handArea.clientWidth - 4;
+      if (inner === _lastW) return;   // 宽度没变就不重排，避免抖动循环
+      _lastW = inner;
+      // 副露宽度：竖牌 0.82w，被叫的横牌 ~1.14w
+      var meldUnits = q.melds.reduce(function (a, m) { return a + (m.tiles.length - 1) * 0.82 + 1.14; }, 0);
+      var gaps = drawGap + (q.melds.length ? meldGap : 0) + 12;   // 12 安全余量，避免出现滚动条
+      var units = (q.concealed.length + 1) + meldUnits;
+      var w = Math.max(24, Math.min(narrow ? 46 : 58, Math.floor((inner - gaps) / units)));
+      els.set.style.setProperty("--hw", w + "px");
+      els.draw.style.setProperty("--hw", w + "px");
+      els.draw.style.marginLeft = drawGap + "px";
+      els.melds.style.marginLeft = q.melds.length ? meldGap + "px" : "0";
+      els.melds.innerHTML = q.melds.map(function (m) { return meldHTML(m, w); }).join("");
+    }
+
+    function render() {
+      var q = QUESTIONS[qi];
+      state = { sel: -1, riichi: false, kan: false, kanKind: null, all: q.concealed.concat([q.draw]) };
+      state.validRiichi = q.canRiichi ? validRiichiSet(state.all) : null;   // 立直可切的牌（听牌切牌）
+
+      els.title.textContent = "第 " + (qi + 1) + " 题";
+      els.banner.innerHTML = "🀄 " + q.demo;
+
+      var s = q.situation;
+      els.sit.innerHTML =
+        '<span class="sb-label">📋 场况</span>' +
+        '<span class="meta-chip"><span class="wind">' + s.round + "</span>" + s.kyoku + "局 " + s.honba + "本场</span>" +
+        '<span class="meta-chip"><span class="k">自风</span><span class="wind">' + s.seat + "</span></span>" +
+        '<span class="meta-chip"><span class="k">第</span>' + s.turn + " 巡</span>" +
+        (s.extra ? '<span class="meta-chip extra">' + s.extra + "</span>" : "");
+
+      // 宝牌指示牌：第 1 张=指示牌，其后 4 张牌背（共 5 张）
+      var dW = 34, dH = Math.round(dW * 446 / 320);
+      var back = '<img style="width:' + dW + "px;height:" + dH + 'px" src="' + MJTiles.src("back") + '" alt="back">';
+      var dora = q.dora.map(function (c) { return '<img style="width:' + dW + "px;height:" + dH + 'px" src="' + MJTiles.src(c) + '" alt="' + c + '">'; }).join("");
+      els.dora.innerHTML = dora + new Array(4 + 1).join(back);
+
+      els.set.innerHTML = q.concealed.map(function (c, i) {
+        return '<button class="seltile" data-idx="' + i + '" type="button">' + rawImg(c) + "</button>";
+      }).join("");
+      els.draw.innerHTML = '<button class="seltile is-draw" data-idx="' + q.concealed.length + '" type="button">' + rawImg(q.draw) + "</button>";
+      _lastW = -1; layout();   // 题目切换强制重排一次
+
+      els.riichi.hidden = !q.canRiichi; els.riichi.classList.remove("is-on");
+      els.kan.hidden = ankanKinds().length === 0; els.kan.classList.remove("is-on");
+      els.declare.hidden = els.riichi.hidden && els.kan.hidden;
+      els.confirm.disabled = true;
+      els.sel.innerHTML = "请点击你要切的牌";
+
+      els.progress.innerHTML = QUESTIONS.map(function (_, i) {
+        return '<span class="qdot' + (i === qi ? " on" : "") + '"></span>';
+      }).join("");
+
+      els.board.style.animation = "none"; void els.board.offsetWidth; els.board.style.animation = "";
+    }
+
+    // 统一上色：根据 state 给牌加 sel / dim / kan-on
+    function paintTiles() {
+      var ts = tiles();
+      [].forEach.call(ts, function (n) { n.classList.remove("sel", "dim", "kan-on"); });
+      if (state.kan) {
+        [].forEach.call(ts, function (n) {
+          var k = baseKind(state.all[+n.dataset.idx]);
+          if (state.kanKind && k === state.kanKind) n.classList.add("kan-on"); else n.classList.add("dim");
+        });
+      } else if (state.sel >= 0) {
+        [].forEach.call(ts, function (n) {
+          if (+n.dataset.idx === state.sel) n.classList.add("sel");
+          else if (state.riichi) n.classList.add("dim");   // ④ 立直+选牌 → 其余变暗
+        });
+      } else if (state.riichi) {
+        [].forEach.call(ts, function (n) {                  // 立直已宣告但未选牌：非听牌切牌变暗
+          if (!state.validRiichi || !state.validRiichi[+n.dataset.idx]) n.classList.add("dim");
+        });
+      }
+    }
+    function updateConfirm() { els.confirm.disabled = state.kan ? !state.kanKind : state.sel < 0; }
+    function updateInfo() {
+      if (state.kan) return;
+      var code = selectedCode(), q = QUESTIONS[qi];
+      if (!code) { els.sel.innerHTML = state.riichi ? "已宣告<b>立直</b>，请选择能<b>听牌</b>的切牌" : "请点击你要切的牌"; return; }
+      var pre = q.canRiichi ? (state.riichi ? "立直 + 切 " : "默听 切 ") : "切 ";
+      els.sel.innerHTML = "已选：<b>" + pre + tileName(code) + "</b>";
+    }
+
+    els.wrap.addEventListener("click", function (e) {
+      var btn = e.target.closest(".seltile"); if (!btn) return;
+      var idx = +btn.dataset.idx, code = state.all[idx];
+      if (state.kan) {                                          // 暗杠模式：点牌=选杠组
+        if (ankanKinds().indexOf(baseKind(code)) >= 0) {
+          state.kanKind = baseKind(code); paintTiles();
+          els.sel.innerHTML = "已选：<b>暗杠 " + tileName(state.kanKind) + "</b>"; updateConfirm();
+        }
+        return;
+      }
+      if (state.riichi && state.validRiichi && !state.validRiichi[idx]) return;   // 立直下：非听牌切牌不可选
+      state.sel = (state.sel === idx) ? -1 : idx;
+      paintTiles(); updateInfo(); updateConfirm();
+    });
+
+    els.riichi.addEventListener("click", function () {
+      if (state.kan) { state.kan = false; state.kanKind = null; els.kan.classList.remove("is-on"); }
+      state.riichi = !state.riichi; els.riichi.classList.toggle("is-on", state.riichi);
+      if (state.riichi && state.sel >= 0 && state.validRiichi && !state.validRiichi[state.sel]) state.sel = -1;  // 已选的牌不满足听牌则取消
+      paintTiles(); updateInfo(); updateConfirm();
+    });
+    els.kan.addEventListener("click", function () {
+      if (els.kan.hidden) return;
+      if (state.kan) { state.kan = false; state.kanKind = null; els.kan.classList.remove("is-on"); paintTiles(); els.sel.innerHTML = "请点击你要切的牌"; updateConfirm(); return; }
+      state.kan = true; state.kanKind = null; state.sel = -1; state.riichi = false; els.riichi.classList.remove("is-on"); els.kan.classList.add("is-on");
+      var kinds = ankanKinds();
+      if (kinds.length === 1) { state.kanKind = kinds[0]; paintTiles(); els.sel.innerHTML = "已选：<b>暗杠 " + tileName(kinds[0]) + "</b>"; }
+      else { paintTiles(); els.sel.innerHTML = "请点击要<b>暗杠</b>的那组牌"; }
+      updateConfirm();
+    });
+
+    els.confirm.addEventListener("click", function () {       // ⑦ 确认=直接下一题
+      if (els.confirm.disabled) return;
+      var q = QUESTIONS[qi];
+      var mine = state.kan ? { action: "ankan", tile: state.kanKind, riichi: false }
+        : { action: "discard", tile: selectedCode(), riichi: state.riichi };
+      var ok = q.answers.some(function (a) { return ansEq(a, mine); });
+      console.log("[" + q.id + "] 提交：" + ansText(mine, q) + " → " + (ok ? "✓ 正确" : "✗（答案：" + q.answers.map(function (a) { return ansText(a, q); }).join(" / ") + "）"));
+      qi = (qi + 1) % QUESTIONS.length;
+      render();
+    });
+
+    render();
+    requestAnimationFrame(layout);
+    window.addEventListener("resize", layout);
+  </script>
+</body>
+</html>

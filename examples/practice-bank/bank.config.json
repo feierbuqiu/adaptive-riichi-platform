@@ -1,0 +1,7 @@
+{
+  "id": "example-practice",
+  "displayName": "Example Practice Bank",
+  "sourceFile": "questions.enriched.jsonl",
+  "expectedUsableQuestions": 3,
+  "cohortPool": [1, 2]
+}

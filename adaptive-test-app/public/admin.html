@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>管理员后台</title>
+    <link rel="stylesheet" href="/styles.css?v=20260619-admin-v2" />
+    <link rel="stylesheet" href="/practice.css?v=20260619-admin-v2" />
+  </head>
+  <body class="admin-app">
+    <main class="admin-shell">
+      <section id="adminLoginView" class="screen is-active">
+        <div class="brand-block">
+          <p class="eyebrow">Admin</p>
+          <h1>管理员后台</h1>
+          <p>此入口仅限管理员使用。</p>
+        </div>
+        <form id="adminLoginForm" class="panel form-panel">
+          <label>用户名<input id="adminUsername" autocomplete="username" required /></label>
+          <label>密码<input id="adminPassword" type="password" autocomplete="current-password" required /></label>
+          <label>二次验证码<input id="adminTotp" inputmode="numeric" autocomplete="one-time-code" /></label>
+          <button class="primary-btn" type="submit">登录</button>
+          <p id="adminLoginMsg" class="message"></p>
+        </form>
+      </section>
+
+      <section id="adminView" class="screen">
+        <header class="topline">
+          <div>
+            <p class="eyebrow">Dashboard</p>
+            <h1>测试管理后台</h1>
+          </div>
+          <div class="action-row inline-actions">
+            <button id="adminLogoutBtn" class="ghost-btn" type="button">退出</button>
+          </div>
+        </header>
+
+        <nav class="admin-tabs" id="adminTabs">
+          <button class="admin-tab is-active" data-tab="overview" type="button">总览</button>
+          <button class="admin-tab" data-tab="practice" type="button">练习管理</button>
+          <button class="admin-tab" data-tab="exam" type="button">自适应考试</button>
+          <button class="admin-tab" data-tab="identities" type="button">用户管理</button>
+          <button class="admin-tab" data-tab="anticheat" type="button">反作弊</button>
+        </nav>
+
+        <!-- 总览 -->
+        <section class="admin-pane is-active" data-pane="overview">
+          <div class="panel admin-panel">
+            <div class="panel-head"><h2>自适应考试 · 概览</h2></div>
+            <div id="dashboardCards" class="stat-grid"></div>
+          </div>
+          <div class="panel admin-panel">
+            <div class="panel-head">
+              <h2>练习系统 · 概览</h2>
+              <div class="action-row inline-actions">
+                <a class="ghost-link" href="/api/admin/practice/cohort.csv">首20题研究数据</a>
+                <a class="ghost-link" href="/api/admin/practice/responses.csv">全部练习数据</a>
+              </div>
+            </div>
+            <div id="practiceDashboardCards" class="stat-grid"></div>
+          </div>
+        </section>
+
+        <!-- 练习管理 -->
+        <section class="admin-pane" data-pane="practice">
+          <div class="panel admin-panel">
+            <div class="panel-head">
+              <div>
+                <h2>练习用户与作答记录</h2>
+                <p class="muted-line">直接选择用户查看轮次、每道题选择、正确答案与多口径用时。</p>
+              </div>
+              <div class="action-row inline-actions admin-filter-row">
+                <input id="practiceUserSearch" class="admin-input" placeholder="搜索昵称或身份" />
+                <select id="practiceUserStatus" class="admin-input admin-select">
+                  <option value="all">全部轮次状态</option>
+                  <option value="active">正在练习</option>
+                  <option value="completed">已完成当前轮</option>
+                </select>
+                <button id="refreshPracticeUsersBtn" class="ghost-btn" type="button">刷新</button>
+              </div>
+            </div>
+            <div id="practiceUserTable" class="table-wrap"></div>
+            <div id="practiceUserPager" class="pager"></div>
+          </div>
+          <div class="panel admin-panel">
+            <div class="panel-head"><h2>练习用户详情</h2></div>
+            <div id="practiceUserDetail" class="detail-box"><p class="message">从上方选择一名用户，即可查看练习轮次和逐题记录。</p></div>
+          </div>
+          <div class="panel admin-panel">
+            <div class="panel-head">
+              <h2>练习题库浏览</h2>
+              <div class="action-row inline-actions">
+                <input id="practiceQFilter" class="admin-input" placeholder="按题号筛选，如 53" inputmode="numeric" />
+                <button id="loadPracticeQBtn" class="ghost-btn" type="button">加载题库</button>
+              </div>
+            </div>
+            <p class="muted-line">点击左侧题号查看牌面与答案。停用练习题需更新私有题库配置，此处为只读浏览。</p>
+            <div class="browser-layout">
+              <div id="practiceQList" class="q-list"></div>
+              <div id="practiceQDetail" class="q-detail detail-box"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 自适应考试 -->
+        <section class="admin-pane" data-pane="exam">
+          <div class="panel admin-panel">
+            <div class="panel-head">
+              <h2>作答记录</h2>
+              <div class="action-row inline-actions">
+                <input id="attemptSearch" class="admin-input" placeholder="搜索昵称 / 身份 / 状态" />
+                <a class="ghost-link" href="/api/admin/export/attempts.csv">下载 CSV</a>
+                <button id="refreshAdminBtn" class="ghost-btn" type="button">刷新</button>
+              </div>
+            </div>
+            <div id="attemptTable" class="table-wrap"></div>
+            <div id="attemptPager" class="pager"></div>
+          </div>
+          <div class="panel admin-panel">
+            <div class="panel-head"><h2>作答详情</h2></div>
+            <div id="attemptDetail" class="detail-box"></div>
+          </div>
+          <div class="panel admin-panel">
+            <div class="panel-head">
+              <h2>考试题库浏览</h2>
+              <button id="loadExamQBtn" class="ghost-btn" type="button">加载题库</button>
+            </div>
+            <p class="muted-line">考试题可启用/停用。考试模式开放后此处即为题目编排核对入口。</p>
+            <div class="browser-layout">
+              <div id="examQList" class="q-list"></div>
+              <div id="examQDetail" class="q-detail detail-box"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 用户管理 -->
+        <section class="admin-pane" data-pane="identities">
+          <div class="panel admin-panel">
+            <div class="panel-head">
+              <div>
+                <h2>用户列表</h2>
+                <p class="muted-line">默认列出最近活跃用户，不再需要预先输入身份 ID。</p>
+              </div>
+              <div class="action-row inline-actions admin-filter-row">
+                <input id="identitySearch" class="admin-input" placeholder="搜索昵称或身份 ID（可留空）" />
+                <select id="identityActivityFilter" class="admin-input admin-select">
+                  <option value="all">全部用户</option>
+                  <option value="practice">做过练习</option>
+                  <option value="exam">做过考试</option>
+                  <option value="none">尚无作答</option>
+                </select>
+                <select id="identityBoardFilter" class="admin-input admin-select">
+                  <option value="all">全部上榜状态</option>
+                  <option value="included">允许上榜</option>
+                  <option value="excluded">已剔除</option>
+                </select>
+                <button id="identitySearchBtn" class="ghost-btn" type="button">刷新列表</button>
+              </div>
+            </div>
+            <div id="identityResults" class="table-wrap"></div>
+            <div id="identityPager" class="pager"></div>
+          </div>
+          <div class="panel admin-panel">
+            <div class="panel-head"><h2>用户详情与快捷操作</h2></div>
+            <div id="identityDetail" class="detail-box"><p class="message">从列表选择用户后，可管理昵称、上榜资格和考试次数，并查看练习与考试记录。</p></div>
+          </div>
+        </section>
+
+        <!-- 反作弊 -->
+        <section class="admin-pane" data-pane="anticheat">
+          <div class="panel admin-panel">
+            <div class="panel-head">
+              <h2>疑似重复聚类</h2>
+              <div class="action-row inline-actions">
+                <button id="manualMergeBtn" class="ghost-btn" type="button">强制合并</button>
+                <button id="refreshSuspiciousBtn" class="ghost-btn" type="button">刷新</button>
+              </div>
+            </div>
+            <div id="suspiciousTable" class="table-wrap"></div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div id="adminToast" class="admin-toast" hidden></div>
+    <div id="adminModal" class="admin-modal" hidden>
+      <div class="admin-modal-card">
+        <h3 id="adminModalTitle">确认</h3>
+        <p id="adminModalText"></p>
+        <div id="adminModalInputWrap" hidden><input id="adminModalInput" class="admin-input" /></div>
+        <div class="action-row">
+          <button id="adminModalCancel" class="ghost-btn" type="button">取消</button>
+          <button id="adminModalOk" class="primary-btn" type="button">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/practice-tiles.js?v=20260619-admin-v2"></script>
+    <script src="/admin.js?v=20260619-admin-v2"></script>
+  </body>
+</html>

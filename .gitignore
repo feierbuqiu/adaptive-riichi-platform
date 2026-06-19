@@ -1,0 +1,46 @@
+# Public repository allowlist. Everything at the workspace root is private
+# unless it is explicitly included below.
+/*
+
+!/.gitignore
+!/.gitattributes
+!/LICENSE
+!/README.md
+!/ROADMAP.md
+!/docker-compose.example.yml
+
+!/adaptive-test-app/
+!/deploy/
+!/svg-tiles/
+!/examples/
+!/docs/
+
+# Runtime and local-development state must never be published.
+/adaptive-test-app/.env
+/adaptive-test-app/.env.*
+!/adaptive-test-app/.env.example
+/adaptive-test-app/data/
+/adaptive-test-app/node_modules/
+/adaptive-test-app/*.log
+
+# Only public deployment templates are tracked.
+/deploy/*
+!/deploy/Caddyfile.example
+!/deploy/README_DEPLOYMENT.md
+
+# Defense in depth for secrets and generated artifacts at any depth.
+**/secrets/
+**/.env
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.sqlite
+**/*.sqlite3
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.tgz
+**/*.zip
+**/*.log
+**/node_modules/

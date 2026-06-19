@@ -1,0 +1,37 @@
+services:
+  app:
+    build:
+      context: ./adaptive-test-app
+    restart: unless-stopped
+    env_file:
+      - ./adaptive-test-app/.env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      SOURCE_ROOT: /opt/adaptive-test-source
+      DB_PATH: /var/lib/adaptive-test/app.sqlite
+      PRACTICE_BANK_ROOT: /opt/adaptive-test-source/practice-bank
+      EXAM_ENABLED: "false"
+    volumes:
+      - ./private-data/app:/var/lib/adaptive-test
+      - ./private-data/practice-bank:/opt/adaptive-test-source/practice-bank:ro
+      - ./svg-tiles/simple_tiles:/opt/adaptive-test-source/svg-tiles/simple_tiles:ro
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile.example:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

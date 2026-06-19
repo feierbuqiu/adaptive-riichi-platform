@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>麻将练习</title>
+    <link rel="stylesheet" href="/styles.css?v=20260619-practice-v6" />
+    <link rel="stylesheet" href="/practice.css?v=20260619-practice-v6" />
+  </head>
+  <body class="user-app practice-app">
+    <main class="shell practice-shell">
+      <header class="practice-nav">
+        <a class="ghost-link" href="/">← 返回总览</a>
+        <div>
+          <p class="eyebrow">Practice</p>
+          <h1>麻将练习</h1>
+        </div>
+        <span class="badge" id="practiceNickname">正在载入…</span>
+      </header>
+
+      <section class="practice-stats" aria-label="练习统计">
+        <article><span>本轮进度</span><strong id="progressStat">0 / 0</strong></article>
+        <article><span>累计正确率</span><strong id="accuracyStat">—</strong></article>
+        <article><span>题数排名</span><strong id="countRankStat">—</strong></article>
+        <article><span>正确率排名</span><strong id="accuracyRankStat">完成20题后入榜</strong></article>
+      </section>
+
+      <section id="loadingView" class="screen is-active panel practice-message-view">
+        <p class="eyebrow">正在准备</p>
+        <h2>载入练习进度…</h2>
+      </section>
+
+      <section id="introView" class="screen panel practice-message-view">
+        <p class="eyebrow">不限时 · 不可回改</p>
+        <h2 id="introTitle">开始首轮练习</h2>
+        <p>每次只显示一道题。提交后立即判定，已经提交的答案不能修改；未提交的题不能跳过。题目数量由私有题库配置决定。</p>
+        <button id="startPracticeBtn" class="primary-btn big-btn" type="button">开始练习</button>
+        <p id="introMessage" class="message"></p>
+      </section>
+
+      <section id="questionView" class="screen">
+        <header class="question-head">
+          <div>
+            <p class="eyebrow" id="roundLabel">第1轮</p>
+            <h2 id="sequenceTitle">本轮第 1 / 0 题</h2>
+          </div>
+          <div id="sourceNumber" class="source-number" hidden>题库原题 · 第 <strong></strong> 题</div>
+        </header>
+
+        <div id="situationBar" class="situation-bar"></div>
+        <div class="dora-wrap">
+          <div class="dora-label">宝牌<br />指示牌</div>
+          <div id="doraTiles" class="dora-tiles"></div>
+        </div>
+
+        <div id="handTray" class="mjhand-tray">
+          <div id="declareRow" class="tray-actions" hidden>
+            <button id="riichiBtn" class="decl-btn riichi-btn" type="button" hidden>立直</button>
+            <button id="kanBtn" class="decl-btn kan-btn" type="button" hidden>暗杠</button>
+          </div>
+          <div id="handArea" class="hand-area">
+            <div id="handWrap" class="hand-wrap">
+              <div class="hand-left">
+                <div id="setRow" class="mjhand-set"></div>
+                <div id="drawRow" class="mjhand-draw"></div>
+              </div>
+              <div id="meldRow" class="hand-melds"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="selection-line">
+          <span id="selectionInfo">请点击你要切的牌</span>
+          <span id="saveState" class="save-state">不限时</span>
+        </div>
+
+        <div id="feedbackPanel" class="feedback-panel" hidden>
+          <div id="feedbackVerdict" class="feedback-verdict"></div>
+          <div class="answer-compare">
+            <div class="answer-chip answer-chip-user"><span>你的选择</span><strong id="selectedAnswerText"></strong></div>
+            <div class="answer-chip answer-chip-correct"><span>正确答案</span><strong id="correctAnswerText"></strong></div>
+          </div>
+          <p>本题不提供解析。提交后显示的题号可用于自行检索讨论。</p>
+        </div>
+
+        <button id="submitAnswerBtn" class="primary-btn big-btn confirm-btn" type="button" disabled>确认提交</button>
+        <button id="nextQuestionBtn" class="primary-btn big-btn confirm-btn" type="button" hidden>下一题 →</button>
+        <p id="questionMessage" class="message"></p>
+      </section>
+
+      <section id="completeView" class="screen panel practice-message-view">
+        <p class="eyebrow">本轮完成</p>
+        <h2 id="completeTitle">本轮练习已完成</h2>
+        <p id="completeSummary"></p>
+        <div class="cta-row">
+          <button id="nextRoundBtn" class="primary-btn big-btn" type="button">开始下一轮</button>
+          <a class="ghost-btn big-btn mode-link" href="/">返回总览</a>
+        </div>
+        <p class="muted-line">下一轮会重新随机排列全部题目。练习成绩继续计入排行榜，但不会进入首轮研究数据。</p>
+      </section>
+
+      <section class="leaderboards panel" id="leaderboards">
+        <div class="panel-head">
+          <div><p class="eyebrow">Leaderboard</p><h2>练习排行榜</h2></div>
+          <button id="refreshBoardBtn" class="ghost-btn" type="button">刷新</button>
+        </div>
+        <div class="practice-board-grid">
+          <div><h3>题数排行</h3><p class="muted-line">至少完成20题后入榜</p><div id="countBoard" class="practice-board"></div></div>
+          <div><h3>正确率排行</h3><p class="muted-line">至少完成20题后入榜</p><div id="accuracyBoard" class="practice-board"></div></div>
+        </div>
+      </section>
+    </main>
+    <script src="/practice-tiles.js?v=20260619-practice-v6"></script>
+    <script src="/practice.js?v=20260619-practice-v6"></script>
+    <script src="/fp.js?v=20260617-security-a"></script>
+  </body>
+</html>

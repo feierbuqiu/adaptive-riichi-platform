@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>立直麻将牌效率自适应测试</title>
+    <link rel="stylesheet" href="/styles.css?v=20260619-practice-v4" />
+  </head>
+  <body class="user-app">
+    <main class="shell">
+      <!-- ============ 腾讯内置浏览器拦截 ============ -->
+      <section id="blockedBrowserView" class="screen">
+        <div class="result-hero panel">
+          <p class="eyebrow">浏览器提示</p>
+          <h1>请在外部浏览器打开</h1>
+          <p class="result-message">检测到你正在使用微信或 QQ 的内置浏览器。为了保证计时、图片加载、Cookie 会话恢复和防刷新规则公平生效，本测试不支持在腾讯系内置浏览器中直接作答。</p>
+          <p class="result-message">请点击右上角菜单，选择“在浏览器打开”，然后使用 Safari、Chrome、Edge 或系统默认浏览器重新进入。</p>
+        </div>
+      </section>
+
+      <!-- ============ 首页 ============ -->
+      <section id="homeView" class="screen is-active">
+        <div class="hero">
+          <p class="eyebrow">Adaptive Riichi Test</p>
+          <h1>立直麻将基础牌效率<br />自适应测试</h1>
+          <p class="hero-sub">无需实名。系统会根据你的作答动态选题，并记录必要的设备、网络摘要和作答时间以维持匿名身份与数据质量。</p>
+          <div class="badge-row">
+            <span class="badge">每题 70 秒</span>
+            <span class="badge">自适应选题</span>
+            <span class="badge">匿名入场</span>
+            <span class="badge" id="remainBadge">共 2 次 · 剩 — 次</span>
+          </div>
+        </div>
+
+        <div class="rule-cards">
+          <div class="rule-card">
+            <h3>① 样题（不计时）</h3>
+            <p>正式开始前，先做 1 道样题熟悉操作。<strong>样题不计时</strong>，可反复查看解答，理解后再进入正式测试。</p>
+          </div>
+          <div class="rule-card">
+            <h3>② 正式测试（计时）</h3>
+            <p><strong>每题限时 70 秒</strong>，最多 25 题，不能回退、不能修改。超时按未作答计分。系统自适应选题并实时评估你的能力。</p>
+          </div>
+        </div>
+
+        <div class="cta-row">
+          <button id="startBtn" class="primary-btn big-btn" type="button">开始测试</button>
+          <button id="toBoardBtn" class="ghost-btn big-btn" type="button">查看排行榜</button>
+        </div>
+        <p id="homeNote" class="home-note"></p>
+        <button id="appealBtn" class="ghost-btn" type="button" hidden>提交人工复核请求</button>
+
+        <section id="homeStanding" class="panel standing-panel" hidden></section>
+
+        <section class="panel board-panel">
+          <div class="panel-head">
+            <h2>排行榜 · 前 10 名</h2>
+            <button id="homeBoardMore" class="ghost-btn" type="button">完整榜单</button>
+          </div>
+          <p class="board-meta" id="homeBoardMeta"></p>
+          <div id="homeBoard" class="board-list"></div>
+          <div class="dist-wrap">
+            <p class="dist-title">能力指数分布</p>
+            <div id="homeDist" class="dist-chart" aria-hidden="true"></div>
+            <div class="dist-axis"><span>0</span><span>50</span><span>100</span></div>
+          </div>
+        </section>
+      </section>
+
+      <!-- ============ 样题 ============ -->
+      <section id="sampleView" class="screen">
+        <header class="topline">
+          <div>
+            <p class="eyebrow">样题 · 不计时</p>
+            <h2 id="sampleTitle">请先完成样题</h2>
+          </div>
+          <button id="sampleHomeBtn" class="ghost-btn" type="button">返回首页</button>
+        </header>
+        <p class="muted-line">样题用于熟悉操作，不计时、不计入成绩。请选择你认为最优的一张切牌。</p>
+        <div class="test-layout">
+          <figure class="image-card">
+            <img id="sampleImage" alt="样题图片" />
+          </figure>
+          <aside class="answer-card">
+            <div id="sampleOptions" class="option-grid"></div>
+            <div id="sampleFeedback" class="feedback"></div>
+            <div class="action-row">
+              <button id="sampleBackBtn" class="ghost-btn" type="button">返回样题</button>
+              <button id="sampleSubmitBtn" class="primary-btn" type="button" disabled>提交样题</button>
+              <button id="sampleSolutionBtn" class="ghost-btn" type="button">查看解答</button>
+              <button id="sampleConfirmBtn" class="primary-btn" type="button">我已理解，进入正式测试</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ============ 正式测试（极简） ============ -->
+      <section id="testView" class="screen">
+        <header class="test-header">
+          <div>
+            <p class="eyebrow">正式测试</p>
+            <h2 id="questionTitle">第 1 题</h2>
+          </div>
+          <div class="timer-box" id="timerBox">
+            <svg class="timer-ring" viewBox="0 0 100 100" aria-hidden="true">
+              <circle class="timer-ring-bg" cx="50" cy="50" r="44" />
+              <circle class="timer-ring-fg" id="timerRing" cx="50" cy="50" r="44" />
+            </svg>
+            <div class="timer-ring-num"><span id="timerValue">--</span><small>秒</small></div>
+          </div>
+        </header>
+        <div class="progress-track"><div id="timerBar"></div></div>
+        <p id="loadingMsg" class="loading-msg">正在准备题目，计时尚未开始。</p>
+        <div class="test-layout">
+          <figure class="image-card">
+            <img id="questionImage" alt="题目图片" />
+          </figure>
+          <aside class="answer-card">
+            <div id="optionGrid" class="option-grid"></div>
+            <div class="action-row">
+              <button id="submitBtn" class="primary-btn" type="button" disabled>确认选择</button>
+              <button id="finishBtn" class="ghost-btn" type="button">提前交卷</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ============ 结果页（丰富） ============ -->
+      <section id="resultView" class="screen">
+        <div class="result-hero panel">
+          <p class="eyebrow">测试结果</p>
+          <div class="tier-badge" id="tierBadge">见习</div>
+          <div class="score-number" id="abilityIndex">0</div>
+          <p class="score-cap">能力指数（0–100）</p>
+          <p id="rankLabel" class="rank-label"></p>
+          <p id="resultMessage" class="result-message"></p>
+          <p id="practiceNote" class="practice-note" hidden></p>
+        </div>
+
+        <div class="panel result-panel">
+          <p class="dist-title">你在所有测试者中的位置</p>
+          <div id="resultDist" class="dist-chart" aria-hidden="true"></div>
+          <div class="dist-axis"><span>0</span><span>50</span><span>100</span></div>
+        </div>
+
+        <div class="panel result-panel" id="nicknamePanel">
+          <h3>上榜昵称（选填）</h3>
+          <p class="muted-line">填写后将出现在公开排行榜。请勿填写真实姓名、手机号等个人信息。留空则以「匿名玩家」展示。</p>
+          <div class="nickname-row">
+            <input id="nicknameInput" maxlength="16" placeholder="给自己起个昵称（2–16 字）" autocomplete="off" />
+            <button id="nicknameSaveBtn" class="primary-btn" type="button">保存</button>
+          </div>
+          <p id="nicknameMsg" class="message"></p>
+        </div>
+
+        <div class="panel result-panel">
+          <h3>成绩分享卡</h3>
+          <p class="muted-line">生成一张成绩卡，长按或下载后可分享到群里。</p>
+          <div class="share-wrap">
+            <img id="shareImg" alt="成绩分享卡预览" />
+          </div>
+          <div class="action-row">
+            <button id="genShareBtn" class="ghost-btn" type="button">生成成绩卡</button>
+            <a id="downloadShareBtn" class="primary-btn" download="riichi-result.png" hidden>下载成绩卡</a>
+          </div>
+        </div>
+
+        <div class="cta-row">
+          <button id="retakeBtn" class="primary-btn big-btn" type="button">再来一次</button>
+          <button id="resultBoardBtn" class="ghost-btn big-btn" type="button">查看排行榜</button>
+        </div>
+        <p id="resultNote" class="home-note"></p>
+      </section>
+
+      <!-- ============ 完整排行榜 ============ -->
+      <section id="leaderboardView" class="screen">
+        <header class="topline">
+          <div>
+            <p class="eyebrow">Leaderboard</p>
+            <h2>完整排行榜</h2>
+          </div>
+          <button id="boardBackBtn" class="ghost-btn" type="button">返回</button>
+        </header>
+        <p class="board-meta" id="fullBoardMeta"></p>
+        <section id="fullStanding" class="panel standing-panel" hidden></section>
+        <div id="fullBoard" class="board-list"></div>
+      </section>
+    </main>
+
+    <!-- 开始确认弹窗 -->
+    <div id="confirmModal" class="modal-overlay" hidden>
+      <div class="modal-card">
+        <h3>开始正式测试？</h3>
+        <p id="confirmText">本次将<strong>消耗 1 次机会</strong>（共 2 次）。开始后每题限时 70 秒，不能回退。确定开始吗？</p>
+        <div class="action-row">
+          <button id="confirmCancelBtn" class="ghost-btn" type="button">再想想</button>
+          <button id="confirmStartBtn" class="primary-btn" type="button">确定开始</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/user.js?v=20260617-polish-v4"></script>
+    <script src="/fp.js?v=20260617-security-a"></script>
+  </body>
+</html>

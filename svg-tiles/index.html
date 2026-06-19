@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>立直麻将牌面 · 开源素材预览</title>
+  <style>
+    :root { --bg: #f4efe4; --ink: #232323; --muted: #777; --line: #e2dcca; --felt: #1f5132; }
+    body.dark { --bg: #10130f; --ink: #e8efe6; --muted: #9bb0a8; --line: #2a3329; --felt: #16241c; }
+    body { margin: 0; background: var(--bg); color: var(--ink); padding: 24px;
+      font-family: system-ui, -apple-system, "Microsoft YaHei", "PingFang SC", sans-serif; }
+    h1 { font-size: 24px; margin: 0 0 4px; }
+    .sub { color: var(--muted); margin: 0 0 16px; line-height: 1.6; }
+    .warn { color: #b3302a; }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0 0 12px; }
+    input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; min-width: 280px; background: #fff; color: #222; }
+    button { font: inherit; padding: 8px 14px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: #333; cursor: pointer; font-weight: 700; }
+    .hand { display: flex; gap: 4px; flex-wrap: wrap; background: var(--felt); padding: 14px; border-radius: 12px; margin-bottom: 22px; box-shadow: inset 0 2px 10px rgba(0,0,0,.25); }
+    .hand img { width: 54px; aspect-ratio: 320/446; display: block; }
+    .row { margin: 16px 0; }
+    .row h2 { font-size: 14px; color: var(--muted); font-weight: 700; margin: 0 0 8px; }
+    .tiles { display: flex; flex-wrap: wrap; gap: 10px; }
+    .cell { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .cell img { width: 62px; aspect-ratio: 320/446; display: block; filter: drop-shadow(0 3px 6px rgba(0,0,0,.15)); }
+    .cell small { color: var(--muted); font-size: 11px; }
+  </style>
+</head>
+<body>
+  <h1>立直麻将牌面 · 开源素材预览</h1>
+  <p class="sub">素材：<code>simple_tiles/</code>（第三方开源，CC0/公有领域）。编码 m/p/s/z；0m/0p/0s=赤宝牌；back=牌背。独立增强分支，未接入正式项目。<br />
+    <span style="color:#1f7a3d;font-weight:600">✓ 字牌已核对：tan=东(1z)、xia=西(3z)，东南西北白发中顺序正确。</span></p>
+
+  <div class="controls">
+    <input id="handInput" value="123m456p0p789s1234567z0m0s" />
+    <button id="renderBtn" type="button">渲染牌型</button>
+    <button id="darkBtn" type="button">切换深色背景</button>
+  </div>
+  <div class="hand" id="hand"></div>
+  <div id="gallery"></div>
+
+  <script src="./tiles.js"></script>
+  <script>
+    function cell(code) { var f = MJTiles.file(code); return '<div class="cell">' + MJTiles.img(code, { width: 62 }) + '<small>' + code + (f ? ' · ' + f : '') + '</small></div>'; }
+    function row(title, codes) { return '<div class="row"><h2>' + title + '</h2><div class="tiles">' + codes.map(cell).join("") + '</div></div>'; }
+    var g = "";
+    g += row("万子 m", ["1m", "2m", "3m", "4m", "5m", "6m", "7m", "8m", "9m"]);
+    g += row("筒子 p", ["1p", "2p", "3p", "4p", "5p", "6p", "7p", "8p", "9p"]);
+    g += row("索子 s", ["1s", "2s", "3s", "4s", "5s", "6s", "7s", "8s", "9s"]);
+    g += row("字牌 z（1东 2南 3西 4北 5白 6发 7中）", ["1z", "2z", "3z", "4z", "5z", "6z", "7z"]);
+    g += row("赤宝牌 0 / 牌背 back", ["0m", "0p", "0s", "back"]);
+    document.getElementById("gallery").innerHTML = g;
+    function renderHand() {
+      var c = MJTiles.parseHand(document.getElementById("handInput").value);
+      document.getElementById("hand").innerHTML = c.map(function (x) { return MJTiles.img(x, { width: 54 }); }).join("");
+    }
+    document.getElementById("renderBtn").addEventListener("click", renderHand);
+    document.getElementById("darkBtn").addEventListener("click", function () { document.body.classList.toggle("dark"); });
+    renderHand();
+  </script>
+</body>
+</html>

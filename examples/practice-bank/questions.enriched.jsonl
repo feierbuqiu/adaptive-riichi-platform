@@ -1,0 +1,3 @@
+{"id":1,"annotation":{"scene":{"round":"East 1","seat":"South"},"dora_indicators":"1m","hand":"123456789m123p1z","draw":"1z","melds":[]},"answer":{"answer_action":"discard","answer_tile":"1z","public_practice_eligible":true,"is_disputed":false}}
+{"id":2,"annotation":{"scene":{"round":"East 2","seat":"West"},"dora_indicators":"4p","hand":"123m234p345s567s1z","draw":"1z","melds":[]},"answer":{"answer_action":"discard","answer_tile":"1z","public_practice_eligible":true,"is_disputed":false}}
+{"id":3,"annotation":{"scene":{"round":"South 1","seat":"North"},"dora_indicators":"7s","hand":"234m345p456s22z66z","draw":"6z","melds":[]},"answer":{"answer_action":"discard","answer_tile":"6z","public_practice_eligible":true,"is_disputed":false}}

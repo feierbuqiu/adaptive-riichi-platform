@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>答题页面预览 · SVG 牌面</title>
+  <link rel="stylesheet" href="/realstyles.css" />
+  <style>
+    .preview-note { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+    .hand-card { min-height: auto; padding: 24px; display: block; }
+    .mjhand-tray {
+      background: linear-gradient(180deg, #1d6b4f 0%, #11402f 100%);
+      border-radius: 14px; padding: 26px 20px 18px;
+      box-shadow: inset 0 3px 16px rgba(0, 0, 0, .42);
+      overflow-x: auto;
+    }
+    .mjhand { display: flex; align-items: flex-end; flex-wrap: nowrap; width: max-content; margin: 0 auto; }
+    .mjhand-set { display: flex; }                 /* 自有牌：紧密相接，无空隙 */
+    .mjhand-draw { display: flex; margin-left: 26px; position: relative; }  /* 自摸牌：拉开间距 */
+    .mjhand-draw::before {
+      content: "自摸"; position: absolute; top: -19px; left: 50%; transform: translateX(-50%);
+      font-size: 11px; font-weight: 800; color: #ffe7a3; letter-spacing: 2px; white-space: nowrap;
+    }
+    .mjhand .mjtile { display: block; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, .30)); }
+    .prompt { font-weight: 800; margin: 20px 0 10px; }
+    .prompt small { font-weight: 600; color: var(--muted); }
+    .tile-opts { display: flex; flex-wrap: wrap; gap: 10px; }
+    .tile-opt {
+      display: flex; flex-direction: column; align-items: center; gap: 5px;
+      border: 1px solid var(--line); border-radius: 10px; padding: 8px 8px 6px; background: #fbfcfd; cursor: pointer;
+      transition: transform .12s ease, box-shadow .16s ease, border-color .16s ease, background-color .16s ease;
+    }
+    .tile-opt:hover { transform: translateY(-2px); border-color: var(--accent); }
+    .tile-opt.sel { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); background: var(--soft-green); }
+    .tile-opt small { font-weight: 800; color: var(--ink); font-size: 12px; }
+    .tile-opt .mjtile { filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .18)); }
+  </style>
+</head>
+<body class="user-app">
+  <main class="shell">
+    <p class="preview-note">⟵ 把 SVG 牌面「套进答题页」的独立预览（复用线上同一套 <code>styles.css</code>，未接入线上）。手牌左侧自有牌<b>紧密相接、无空隙</b>；最右侧<b>拉开间距</b>的是新摸入的自摸牌。</p>
+
+    <section class="screen is-active">
+      <header class="test-header">
+        <div>
+          <p class="eyebrow">正式测试 · 预览</p>
+          <h2>第 7 题</h2>
+        </div>
+        <div class="timer-box" id="timerBox">
+          <svg class="timer-ring" viewBox="0 0 100 100" aria-hidden="true">
+            <circle class="timer-ring-bg" cx="50" cy="50" r="44"></circle>
+            <circle class="timer-ring-fg" id="timerRing" cx="50" cy="50" r="44" style="stroke-dashoffset:91"></circle>
+          </svg>
+          <div class="timer-ring-num"><span id="timerValue">47</span><small>秒</small></div>
+        </div>
+      </header>
+
+      <figure class="image-card hand-card">
+        <div class="mjhand-tray" id="handTray"></div>
+      </figure>
+
+      <p class="prompt">请选择你认为最优的一张切牌：<small>（最右为自摸牌）</small></p>
+      <aside class="answer-card">
+        <div class="tile-opts" id="opts"></div>
+        <div class="action-row">
+          <button class="primary-btn" type="button">确认选择</button>
+          <button class="ghost-btn" type="button">提前交卷</button>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script src="./tiles.js"></script>
+  <script>
+    // 示例：1-shanten 手牌，含赤五万(0m)，自摸 1s
+    var hand13 = ["3m", "4m", "0m", "6m", "7m", "2p", "3p", "4p", "6p", "7p", "8p", "5s", "5s"];
+    var tsumo = "1s";
+    var DRAW_GAP = 26;
+    var tray = document.getElementById("handTray");
+    var count = hand13.length + 1;
+    var avail = (tray.clientWidth || 680) - 8;
+    var w = Math.max(34, Math.min(60, Math.floor((avail - DRAW_GAP) / count)));
+    tray.innerHTML = MJTiles.hand(hand13.concat(tsumo), { width: w, tsumo: 1 });
+
+    var options = ["3m", "4m", "0m", "2p", "6p", "8p", "5s", "1s"];
+    document.getElementById("opts").innerHTML = options.map(function (c) {
+      return '<div class="tile-opt" data-code="' + c + '">' + MJTiles.img(c, { width: 46 }) + '<small>' + c + '</small></div>';
+    }).join("");
+    document.getElementById("opts").addEventListener("click", function (e) {
+      var el = e.target.closest(".tile-opt"); if (!el) return;
+      [].forEach.call(this.querySelectorAll(".tile-opt"), function (x) { x.classList.remove("sel"); });
+      el.classList.add("sel");
+    });
+  </script>
+</body>
+</html>
