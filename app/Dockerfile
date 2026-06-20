@@ -11,6 +11,7 @@ COPY package.json ./
 COPY src ./src
 COPY public ./public
 COPY scripts ./scripts
+COPY migrations ./migrations
 
 RUN mkdir -p /var/lib/adaptive-test \
   && chown -R node:node /var/lib/adaptive-test /app

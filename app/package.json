@@ -7,8 +7,14 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "NODE_ENV=development node src/server.js",
-    "check": "node --check src/server.js && node --check src/practice.js && node --check src/maintenance.js && node --check scripts/backup-db.mjs && node --check public/portal.js && node --check public/practice.js && node --check public/practice-tiles.js && node --check public/admin.js && node --check public/user.js",
-    "test": "node --test tests/*.test.mjs"
+    "check": "node --check src/server.js && node --check src/practice.js && node --check src/maintenance.js && node --check src/migrations.js && node --check src/config.js && node --check scripts/backup-db.mjs && node --check scripts/generate-secrets.mjs && node --check scripts/migrate.mjs && node --check scripts/restore-check.mjs && node --check scripts/smoke-test.mjs && node --check scripts/guard-public-tree.mjs && node --check public/portal.js && node --check public/practice.js && node --check public/practice-tiles.js && node --check public/admin.js && node --check public/user.js",
+    "test": "node --test tests/*.test.mjs",
+    "migrate": "node scripts/migrate.mjs",
+    "migrate:check": "node scripts/migrate.mjs --check",
+    "migrate:status": "node scripts/migrate.mjs --status",
+    "restore-check": "node scripts/restore-check.mjs",
+    "smoke": "node scripts/smoke-test.mjs",
+    "guard": "node scripts/guard-public-tree.mjs"
   },
   "engines": {
     "node": ">=25.0.0"
