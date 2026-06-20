@@ -8,6 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 
 const require = createRequire(import.meta.url);
 const { runMigrations, listMigrationFiles, checksum, DEFAULT_MIGRATIONS_DIR } = require("../src/migrations.js");
+const EXPECTED = listMigrationFiles(DEFAULT_MIGRATIONS_DIR);
 
 function freshDb() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "migrations-test-"));
@@ -20,8 +21,8 @@ test("fresh apply builds the full schema and records an ordered ledger", () => {
   const { db, dir } = freshDb();
   try {
     const result = runMigrations(db, { dir: DEFAULT_MIGRATIONS_DIR });
-    assert.deepEqual(result.applied, ["001_core.sql", "002_practice.sql"]);
-    assert.deepEqual(result.ledger, ["001_core.sql", "002_practice.sql"]);
+    assert.deepEqual(result.applied, EXPECTED);
+    assert.deepEqual(result.ledger, EXPECTED);
     const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row) => row.name));
     for (const table of ["identities", "attempts", "audit_logs", "fingerprints", "practice_responses", "practice_rounds", "schema_migrations"]) {
       assert.ok(tables.has(table), `expected table ${table}`);
@@ -38,7 +39,7 @@ test("re-applying migrations is idempotent and changes nothing", () => {
     runMigrations(db, { dir: DEFAULT_MIGRATIONS_DIR });
     const second = runMigrations(db, { dir: DEFAULT_MIGRATIONS_DIR });
     assert.deepEqual(second.applied, []);
-    assert.deepEqual(second.ledger, ["001_core.sql", "002_practice.sql"]);
+    assert.deepEqual(second.ledger, EXPECTED);
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -56,7 +57,7 @@ test("baseline against an existing table preserves data and only records the led
     )`);
     db.prepare("INSERT INTO audit_logs (id, actor_type, action, created_at) VALUES ('a1', 'admin', 'seed', '2026-06-20T00:00:00Z')").run();
     const result = runMigrations(db, { dir: DEFAULT_MIGRATIONS_DIR });
-    assert.deepEqual(result.applied, ["001_core.sql", "002_practice.sql"]);
+    assert.deepEqual(result.applied, EXPECTED);
     const preserved = db.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n;
     assert.equal(preserved, 1, "existing rows must survive the idempotent baseline");
   } finally {
@@ -105,7 +106,7 @@ test("id filter applies only the requested migration so modules can own their ow
 
 test("migration files are well-formed and newline-normalized checksums are stable", () => {
   const files = listMigrationFiles(DEFAULT_MIGRATIONS_DIR);
-  assert.deepEqual(files, ["001_core.sql", "002_practice.sql"]);
+  assert.deepEqual(files, EXPECTED);
   for (const name of files) {
     const content = fs.readFileSync(path.join(DEFAULT_MIGRATIONS_DIR, name), "utf8");
     assert.equal(checksum(content), checksum(content.replace(/\n/g, "\r\n")), "checksum must ignore line-ending differences");

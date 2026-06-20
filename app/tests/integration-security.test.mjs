@@ -7,6 +7,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { DatabaseSync } from "node:sqlite";
 
 function reservePort() {
   return new Promise((resolve, reject) => {
@@ -125,4 +126,18 @@ test("user writes enforce per-identity CSRF, identity isolation, and survive ove
   assert.ok(oversized.status >= 400, `oversized body should be rejected, got ${oversized.status}`);
   const stillAlive = await request(port, `127.0.0.1:${port}`, "/api/user/me", { headers: { Cookie: a.cookie } });
   assert.equal(stillAlive.status, 200, "server must remain responsive after an oversized request");
+
+  // ENG-005: every response carries a request id.
+  assert.match(stillAlive.headers["x-request-id"] || "", /^req_/);
+
+  // OPS-005: the anonymous RUM beacon is accepted without identity/CSRF, stores valid
+  // telemetry, and swallows malformed input without erroring or storing it.
+  const rumOk = await request(port, `127.0.0.1:${port}`, "/api/rum", { method: "POST", body: { page: "/practice", lcpMs: 1200, cls: 0.05, navType: "navigate" } });
+  assert.equal(rumOk.status, 204, rumOk.body);
+  const rumJunk = await request(port, `127.0.0.1:${port}`, "/api/rum", { method: "POST", body: "not-json-object" });
+  assert.equal(rumJunk.status, 204, "malformed telemetry is swallowed, not errored");
+  const telemetryDb = new DatabaseSync(path.join(root, "app.sqlite"), { readOnly: true });
+  const rumCount = telemetryDb.prepare("SELECT COUNT(*) AS n FROM rum_events").get().n;
+  telemetryDb.close();
+  assert.equal(rumCount, 1, "exactly the one valid beacon was stored");
 });

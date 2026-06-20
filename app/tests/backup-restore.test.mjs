@@ -8,7 +8,8 @@ import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
 const require = createRequire(import.meta.url);
-const { runMigrations, DEFAULT_MIGRATIONS_DIR } = require("../src/migrations.js");
+const { runMigrations, listMigrationFiles, DEFAULT_MIGRATIONS_DIR } = require("../src/migrations.js");
+const EXPECTED_MIGRATIONS = listMigrationFiles(DEFAULT_MIGRATIONS_DIR);
 const APP_ROOT = path.resolve(".");
 
 function run(script, args, env) {
@@ -39,7 +40,7 @@ test("backup-db produces an integral copy that restore-check can verify end to e
     assert.equal(restore.status, 0, `restore-check failed: ${restore.stderr}`);
     const restoreReport = JSON.parse(restore.stdout.trim());
     assert.equal(restoreReport.integrity, "ok");
-    assert.deepEqual(restoreReport.migrations, ["001_core.sql", "002_practice.sql"]);
+    assert.deepEqual(restoreReport.migrations, EXPECTED_MIGRATIONS);
     assert.equal(restoreReport.counts.audit_logs, 1);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

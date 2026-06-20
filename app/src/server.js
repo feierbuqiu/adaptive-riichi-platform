@@ -8,6 +8,8 @@ const { DatabaseSync } = require("node:sqlite");
 const { createPracticeService } = require("./practice");
 const { runMigrations } = require("./migrations");
 const { IS_PROD, CONFIG, SECRET } = require("./config");
+const { createJobLock } = require("./jobs");
+const { newRequestId, routeTemplate, accessLog } = require("./logging");
 const {
   FixedWindowRateLimiter,
   clusterCandidatePairs,
@@ -33,6 +35,7 @@ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new DatabaseSync(DB_PATH);
 db.exec("PRAGMA journal_mode=WAL");
 db.exec("PRAGMA foreign_keys=ON");
+db.exec("PRAGMA busy_timeout=5000"); // OPS-003: tolerate brief write contention during deploy overlap
 let practiceService = null;
 
 const MIME = {
@@ -480,7 +483,7 @@ function initSchema() {
   // (migrations/001_core.sql). Every statement is idempotent, so on the existing
   // production database this only records the baseline in schema_migrations without
   // altering any data.
-  runMigrations(db, { dir: MIGRATIONS_DIR, ids: ["001_core.sql"] });
+  runMigrations(db, { dir: MIGRATIONS_DIR, ids: ["001_core.sql", "003_observability.sql"] });
   // Idempotent legacy data backfill for databases created before the migration baseline.
   // No-op on fresh databases and on current production; retained as a safety net until a
   // destructive-migration drill retires it.
@@ -1944,7 +1947,45 @@ function isAdminHost(req, pathname) {
 // User / public API
 // ---------------------------------------------------------------------------
 
+function recordRumEvent(req, body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return;
+  const intOrNull = (value, max) => { const n = Math.round(Number(value)); return Number.isFinite(n) && n >= 0 && n <= max ? n : null; };
+  const str = (value, max) => (value == null ? null : String(value).slice(0, max) || null);
+  const ua = parseUserAgent(req.headers["user-agent"]);
+  const ray = String(req.headers["cf-ray"] || "");
+  const pop = ray.includes("-") ? ray.split("-").pop().slice(0, 6) : null;
+  db.prepare(`
+    INSERT INTO rum_events
+      (id, created_at, page, nav_type, failure_stage, ttfb_ms, load_ms, lcp_ms, inp_ms, cls_x1000, ua_browser, ua_os, ua_device, region, cdn_pop)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id("rum"), nowIso(), str(body.page, 80), str(body.navType, 16), str(body.failureStage, 40),
+    intOrNull(body.ttfbMs, 600000), intOrNull(body.loadMs, 600000), intOrNull(body.lcpMs, 600000), intOrNull(body.inpMs, 600000),
+    intOrNull((Number(body.cls) || 0) * 1000, 100000), ua.browser, ua.os, ua.device,
+    str(req.headers["cf-ipcountry"], 4), pop,
+  );
+}
+
+function pruneRumEvents() {
+  try {
+    const cutoff = new Date(nowMs() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    db.prepare("DELETE FROM rum_events WHERE created_at < ?").run(cutoff);
+  } catch (err) {
+    console.error("[rum] prune failed", err.message);
+  }
+}
+
 async function handleUserApi(req, res, url) {
+  // OPS-005: anonymous, same-origin RUM beacon. No identity or CSRF (it fires on pagehide),
+  // bounded and rate-limited, and it must never surface an error to the client.
+  if (req.method === "POST" && url.pathname === "/api/rum") {
+    const limited = checkRateLimit(req, "rum", 60, 60);
+    if (limited.allowed) {
+      try { recordRumEvent(req, await readJson(req)); } catch { /* telemetry must never error the client */ }
+    }
+    res.writeHead(204).end();
+    return;
+  }
   if (isTencentMobileBrowser(req)) {
     return json(res, 403, {
       code: "TENCENT_IN_APP_BROWSER_BLOCKED",
@@ -2927,7 +2968,7 @@ async function router(req, res) {
     return serveFile(res, filePath, staticCacheFor(filePath), req.method === "HEAD", extraHeaders);
   } catch (err) {
     console.error(err);
-    if (!res.headersSent) return json(res, 500, { error: "服务器错误。" });
+    if (!res.headersSent) return json(res, 500, { error: "服务器错误。", code: "INTERNAL", requestId: req.id });
     try { res.end(); } catch { /* noop */ }
   }
 }
@@ -2955,7 +2996,38 @@ practiceService.init();
 markClusterRebuildDirty();
 processClusterRebuildJob();
 
+// OPS-003: every process elects itself for background work via a heartbeat lock so two
+// overlapping revisions never run duplicate singleton jobs. Failing open keeps a lone
+// instance's jobs running even if the lock store errors.
+const INSTANCE_ID = `inst_${crypto.randomBytes(6).toString("hex")}`;
+const jobLock = createJobLock(db, { instanceId: INSTANCE_ID, nowMs, ttlMs: 90000 });
+function isBackgroundLeader() {
+  try {
+    return jobLock.acquire("background");
+  } catch (err) {
+    console.error("[jobs] lock error, failing open", err.message);
+    return true;
+  }
+}
+
 const server = http.createServer((req, res) => {
+  req.id = newRequestId();
+  const startNs = process.hrtime.bigint();
+  res.setHeader("X-Request-Id", req.id);
+  // OPS-005: one structured, redacted access line per request, emitted after it completes.
+  res.on("finish", () => {
+    try {
+      const ms = Number(process.hrtime.bigint() - startNs) / 1e6;
+      accessLog({
+        id: req.id,
+        m: req.method,
+        route: routeTemplate((req.url || "/").split("?")[0]),
+        status: res.statusCode,
+        ms: Math.round(ms),
+        cc: String(req.headers["cf-ipcountry"] || "") || undefined,
+      });
+    } catch { /* logging must never throw */ }
+  });
   router(req, res);
 });
 // OPS-002：HTTP 超时，防止慢速/挂起连接长期占用事件循环与连接
@@ -3022,6 +3094,10 @@ function sweepActiveAttempts() {
 }
 
 sweepActiveAttempts(); // collect existing zombie sessions on startup
-setInterval(sweepActiveAttempts, CONFIG.sweepIntervalSeconds * 1000);
+// OPS-003: DB-mutating singleton jobs run only on the elected leader (safe under deploy
+// overlap); rate-limit pruning stays per-process because each instance owns its own
+// in-memory limiter.
+setInterval(() => { if (isBackgroundLeader()) sweepActiveAttempts(); }, CONFIG.sweepIntervalSeconds * 1000);
 setInterval(pruneRateLimitBuckets, 60 * 1000);    // SEC-003：定期清理过期限流桶
-setInterval(processClusterRebuildJob, 30 * 1000); // PERF-001：合并执行后台聚类重建
+setInterval(() => { if (isBackgroundLeader()) processClusterRebuildJob(); }, 30 * 1000); // PERF-001：合并执行后台聚类重建
+setInterval(pruneRumEvents, 6 * 60 * 60 * 1000);  // OPS-005：定期清理过期 RUM 遥测
