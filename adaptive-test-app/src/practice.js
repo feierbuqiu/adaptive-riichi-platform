@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { csvCell } = require("./maintenance");
 
 const MIN_ACCURACY_RANK_ANSWERS = 20;
 const IDLE_THRESHOLD_MS = 5 * 60 * 1000;
@@ -176,8 +177,7 @@ function timingPayload(raw) {
 }
 
 function csvText(rows, headers) {
-  const escape = (value) => `"${String(value == null ? "" : value).replace(/"/g, '""')}"`;
-  return [headers.join(","), ...rows.map((row) => headers.map((header) => escape(row[header])).join(","))].join("\n");
+  return [headers.join(","), ...rows.map((row) => headers.map((header) => csvCell(row[header])).join(","))].join("\n");
 }
 
 function createPracticeService(options) {

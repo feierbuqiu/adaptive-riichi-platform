@@ -6,6 +6,12 @@ const vm = require("node:vm");
 const { URL } = require("node:url");
 const { DatabaseSync } = require("node:sqlite");
 const { createPracticeService } = require("./practice");
+const {
+  FixedWindowRateLimiter,
+  clusterCandidatePairs,
+  csvCell,
+  isLoopbackHealthRequest,
+} = require("./maintenance");
 
 const APP_ROOT = path.resolve(__dirname, "..");
 const SOURCE_ROOT = process.env.SOURCE_ROOT
@@ -51,6 +57,12 @@ const CONFIG = {
   attemptStartRateLimitPerMinute: Number(process.env.ATTEMPT_START_RATE_LIMIT_PER_MINUTE) || 20,
   attemptWriteRateLimitPerMinute: Number(process.env.ATTEMPT_WRITE_RATE_LIMIT_PER_MINUTE) || 180,
   assetRateLimitPerMinute: Number(process.env.ASSET_RATE_LIMIT_PER_MINUTE) || 240,
+  identityCreateRateLimitPerHour: Number(process.env.IDENTITY_CREATE_RATE_LIMIT_PER_HOUR) || 120,
+  globalRateLimitPerMinute: Number(process.env.GLOBAL_RATE_LIMIT_PER_MINUTE) || 5000,
+  rateLimitScopeMultiplier: Number(process.env.RATE_LIMIT_SCOPE_MULTIPLIER) || 20,
+  clusterRebuildMaxPairs: Number(process.env.CLUSTER_REBUILD_MAX_PAIRS) || 100000,
+  clusterRebuildMaxMs: Number(process.env.CLUSTER_REBUILD_MAX_MS) || 5000,
+  clusterRebuildMaxRetries: Number(process.env.CLUSTER_REBUILD_MAX_RETRIES) || 3,
   examEnabled: String(process.env.EXAM_ENABLED || "false").toLowerCase() === "true",
   publicHostnames: envList("PUBLIC_HOSTNAMES", "localhost,127.0.0.1"),
   adminHostnames: envList("ADMIN_HOSTNAMES", "admin.localhost"),
@@ -68,7 +80,9 @@ if (IS_PROD && !SECRET) {
   throw new Error("SESSION_SECRET is required in production");
 }
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
+// The production database lives on an explicit writable mount. Avoid touching
+// /app/data when the container root filesystem is read-only.
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new DatabaseSync(DB_PATH);
 db.exec("PRAGMA journal_mode=WAL");
 db.exec("PRAGMA foreign_keys=ON");
@@ -256,6 +270,7 @@ function captureServerFingerprint(req, identityId, attemptId) {
     nowIso(),
   );
   db.prepare("UPDATE identities SET last_fingerprint_id = ? WHERE id = ?").run(fingerprintId, identityId);
+  markClusterRebuildDirty();
   return fingerprintId;
 }
 
@@ -299,23 +314,67 @@ function isTencentMobileBrowser(req) {
   return mobile && (wechat || qqBrowser || qqInApp);
 }
 
-const rateLimitBuckets = new Map();
+const RATE_LIMIT_MAX_KEYS = 50000; // SEC-003：硬容量上限，防止内存无界增长
+const rateLimiter = new FixedWindowRateLimiter({ maxKeys: RATE_LIMIT_MAX_KEYS });
+
+function pruneRateLimitBuckets() {
+  return rateLimiter.prune();
+}
 
 function checkRateLimit(req, scope, limit, windowSeconds) {
-  const now = nowMs();
-  const windowMs = windowSeconds * 1000;
-  const key = `${scope}:${deviceHash(req)}`;
-  const bucket = rateLimitBuckets.get(key);
-  if (!bucket || bucket.resetAt <= now) {
-    rateLimitBuckets.set(key, { count: 1, resetAt: now + windowMs });
-    return { allowed: true, retryAfterSeconds: 0 };
+  const ip = clientIp(req) || "noip";
+  const identityId = (() => {
+    try { return getIdentity(req)?.id || null; } catch { return null; }
+  })();
+  const globalResult = rateLimiter.consume([
+    { key: "global:all", limit: CONFIG.globalRateLimitPerMinute, layer: "global" },
+  ], 60);
+  if (!globalResult.allowed) return globalResult;
+  const rules = [
+    { key: `scope:${scope}`, limit: Math.max(limit, Math.ceil(limit * CONFIG.rateLimitScopeMultiplier)), layer: "endpoint" },
+    { key: `ip:${scope}:${ip}`, limit, layer: "ip" },
+  ];
+  if (identityId) rules.push({ key: `identity:${scope}:${identityId}`, limit, layer: "identity" });
+  return rateLimiter.consume(rules, windowSeconds);
+}
+
+// PERF-001：聚类重建移出请求链——指纹/申诉只标记“需要重算”，由单实例后台任务合并执行
+let clusterRebuildDirty = false;
+let clusterRebuildRunning = false;
+let clusterRebuildFailures = 0;
+const clusterRebuildStatus = {
+  state: "idle",
+  lastStartedAt: null,
+  lastFinishedAt: null,
+  lastError: null,
+  lastCandidatePairs: 0,
+};
+function markClusterRebuildDirty() {
+  clusterRebuildDirty = true;
+  if (clusterRebuildFailures >= CONFIG.clusterRebuildMaxRetries) clusterRebuildFailures = 0;
+}
+function processClusterRebuildJob() {
+  if (clusterRebuildRunning || !clusterRebuildDirty) return;
+  clusterRebuildRunning = true;
+  clusterRebuildDirty = false;
+  clusterRebuildStatus.state = "running";
+  clusterRebuildStatus.lastStartedAt = nowIso();
+  try {
+    const result = rebuildIdentityClusters(true) || {};
+    clusterRebuildFailures = 0;
+    clusterRebuildStatus.state = "idle";
+    clusterRebuildStatus.lastFinishedAt = nowIso();
+    clusterRebuildStatus.lastError = null;
+    clusterRebuildStatus.lastCandidatePairs = result.candidatePairs || 0;
+  } catch (err) {
+    clusterRebuildFailures += 1;
+    clusterRebuildStatus.state = clusterRebuildFailures < CONFIG.clusterRebuildMaxRetries ? "retrying" : "failed";
+    clusterRebuildStatus.lastError = String(err.message || err).slice(0, 500);
+    clusterRebuildDirty = clusterRebuildFailures < CONFIG.clusterRebuildMaxRetries;
+    console.error("[cluster] background rebuild failed", err.message);
+  } finally {
+    clusterRebuildRunning = false;
   }
-  bucket.count += 1;
-  if (bucket.count <= limit) return { allowed: true, retryAfterSeconds: 0 };
-  return {
-    allowed: false,
-    retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
-  };
 }
 
 function tableInfo(table) {
@@ -1465,6 +1524,7 @@ function rebuildIdentityClusters(force = false) {
   const now = nowMs();
   if (!force && now - _clusterRebuildAt < 5000) return;
   _clusterRebuildAt = now;
+  const startedAt = nowMs();
 
   const signals = latestFingerprintSignals();
   const ids = signals.map((s) => s.id);
@@ -1472,34 +1532,38 @@ function rebuildIdentityClusters(force = false) {
   const overrides = latestPairOverrides();
   const edges = [];
 
-  for (let i = 0; i < signals.length; i += 1) {
-    for (let j = i + 1; j < signals.length; j += 1) {
-      const a = signals[i];
-      const b = signals[j];
-      const key = pairKey(a.id, b.id);
-      const override = overrides.get(key);
-      if (override && override.action === "force_separate") continue;
-      const blocked = sameValue(a.ipPrefixHash, b.ipPrefixHash)
-        || sameValue(a.webglKey, b.webglKey)
-        || sameValue(a.deviceHash, b.deviceHash)
-        || (override && override.action === "force_merge");
-      if (!blocked) continue;
-      const cmp = compareIdentitySignals(a, b, override ? override.action : null);
-      if (cmp.confidenceLevel === "low") continue;
-      edges.push({
-        identityA: a.id,
-        identityB: b.id,
-        score: cmp.score,
-        confidenceLevel: cmp.confidenceLevel,
-        autoEnforced: cmp.autoEnforced ? 1 : 0,
-        evidence: {
-          matches: cmp.matches,
-          strong: cmp.strong,
-          medium: cmp.medium,
-          override: override ? { action: override.action, reason: override.reason || null } : null,
-        },
-      });
+  const forceMergePairs = [...overrides.entries()]
+    .filter(([, override]) => override.action === "force_merge")
+    .map(([key]) => key);
+  const candidateResult = clusterCandidatePairs(signals, forceMergePairs, CONFIG.clusterRebuildMaxPairs);
+  if (candidateResult.truncated) {
+    throw new Error(`cluster candidate limit exceeded (${CONFIG.clusterRebuildMaxPairs})`);
+  }
+  for (const [leftId, rightId] of candidateResult.pairs) {
+    if (nowMs() - startedAt > CONFIG.clusterRebuildMaxMs) {
+      throw new Error(`cluster rebuild exceeded ${CONFIG.clusterRebuildMaxMs}ms before commit`);
     }
+    const a = byId.get(leftId);
+    const b = byId.get(rightId);
+    if (!a || !b) continue;
+    const key = pairKey(a.id, b.id);
+    const override = overrides.get(key);
+    if (override && override.action === "force_separate") continue;
+    const cmp = compareIdentitySignals(a, b, override ? override.action : null);
+    if (cmp.confidenceLevel === "low") continue;
+    edges.push({
+      identityA: a.id,
+      identityB: b.id,
+      score: cmp.score,
+      confidenceLevel: cmp.confidenceLevel,
+      autoEnforced: cmp.autoEnforced ? 1 : 0,
+      evidence: {
+        matches: cmp.matches,
+        strong: cmp.strong,
+        medium: cmp.medium,
+        override: override ? { action: override.action, reason: override.reason || null } : null,
+      },
+    });
   }
 
   const highUf = unionFind(ids);
@@ -1573,10 +1637,10 @@ function rebuildIdentityClusters(force = false) {
     throw err;
   }
   invalidateLeaderboard();
+  return { identities: ids.length, candidatePairs: candidateResult.count, edges: edges.length };
 }
 
 function enforcedClusterForIdentity(identityId) {
-  rebuildIdentityClusters();
   return db.prepare(`
     SELECT c.*
     FROM identity_cluster_members m JOIN identity_clusters c ON c.id = m.cluster_id
@@ -1623,7 +1687,6 @@ function createAppeal(identityId, message) {
 }
 
 function adminClusterPayload() {
-  rebuildIdentityClusters(true);
   const clusters = db.prepare("SELECT * FROM identity_clusters ORDER BY auto_enforced DESC, confidence DESC, member_count DESC, updated_at DESC").all();
   return clusters.map((cluster) => {
     const members = db.prepare(`
@@ -1678,7 +1741,6 @@ function invalidateLeaderboard() {
 function buildLeaderboard() {
   const now = nowMs();
   if (_lbCache.data && now - _lbCache.at < CONFIG.leaderboardCacheMs) return _lbCache.data;
-  rebuildIdentityClusters();
   const attempts = db.prepare(`
     SELECT i.id AS identityId, i.nickname AS nickname, i.excluded_from_board AS excluded,
            COALESCE(m.cluster_id, i.id) AS personKey,
@@ -2225,6 +2287,10 @@ async function handleUserApi(req, res, url) {
     let identity = getIdentity(req);
     let setCookieHeader = null;
     if (!identity) {
+      const identityCreateLimit = checkRateLimit(req, "identity_create", CONFIG.identityCreateRateLimitPerHour, 60 * 60);
+      if (!identityCreateLimit.allowed) {
+        return json(res, 429, { error: "身份创建请求过于频繁，请稍后再试。", retryAfterSeconds: identityCreateLimit.retryAfterSeconds }, { "Retry-After": String(identityCreateLimit.retryAfterSeconds) });
+      }
       identity = mintIdentity(req, res);
       setCookieHeader = res.__identityCookie;
     } else {
@@ -2413,7 +2479,7 @@ async function handleUserApi(req, res, url) {
       str(c.webglVendor, 128), str(c.webglRenderer, 256), str(c.webglHash, 64), JSON.stringify(c).slice(0, 2000), nowIso(),
     );
     db.prepare("UPDATE identities SET last_fingerprint_id = ? WHERE id = ?").run(fingerprintId, identity.id);
-    try { rebuildIdentityClusters(true); } catch (err) { console.error("[cluster] rebuild after fp failed", err.message); }
+    markClusterRebuildDirty(); // PERF-001：只标记需要重算，由后台任务合并执行，不在请求内做全量聚类
     return json(res, 200, { ok: true, csrf: identity.csrf_token });
   }
 
@@ -2468,7 +2534,6 @@ async function handleUserApi(req, res, url) {
     db.prepare("UPDATE identities SET used_attempts = used_attempts + 1, active_attempt_id = ? WHERE id = ?").run(attemptId, fresh.id);
     try {
       captureServerFingerprint(req, fresh.id, attemptId);
-      rebuildIdentityClusters(true);
     } catch (err) {
       console.error("[fp] capture failed", err.message);
     }
@@ -2660,7 +2725,7 @@ async function handleAdminApi(req, res, url) {
       WHERE a.status = 'open'
       ORDER BY a.created_at DESC LIMIT 100
     `).all();
-    return json(res, 200, { clusters, appeals, csrf });
+    return json(res, 200, { clusters, appeals, clusterRebuild: { ...clusterRebuildStatus, queued: clusterRebuildDirty }, csrf });
   }
 
   if (req.method === "POST" && url.pathname === "/api/admin/clusters/merge") {
@@ -2680,8 +2745,9 @@ async function handleAdminApi(req, res, url) {
     }
     db.prepare("INSERT INTO audit_logs (id, actor_type, actor_id, action, target_type, target_id, details_json, created_at) VALUES (?, 'admin', ?, 'force_merge_identities', 'cluster', ?, ?, ?)")
       .run(id("aud"), admin.id, identityIds[0], JSON.stringify({ identityIds, reason }), nowIso());
-    rebuildIdentityClusters(true);
-    return json(res, 200, { ok: true, clusters: adminClusterPayload(), csrf });
+    markClusterRebuildDirty();
+    setImmediate(processClusterRebuildJob);
+    return json(res, 200, { ok: true, rebuildQueued: true, clusters: adminClusterPayload(), csrf });
   }
 
   const separateMatch = url.pathname.match(/^\/api\/admin\/clusters\/([^/]+)\/members\/([^/]+)\/separate$/);
@@ -2698,8 +2764,9 @@ async function handleAdminApi(req, res, url) {
     }
     db.prepare("INSERT INTO audit_logs (id, actor_type, actor_id, action, target_type, target_id, details_json, created_at) VALUES (?, 'admin', ?, 'force_separate_identity', 'cluster', ?, ?, ?)")
       .run(id("aud"), admin.id, clusterId, JSON.stringify({ identityId, members, reason }), nowIso());
-    rebuildIdentityClusters(true);
-    return json(res, 200, { ok: true, clusters: adminClusterPayload(), csrf });
+    markClusterRebuildDirty();
+    setImmediate(processClusterRebuildJob);
+    return json(res, 200, { ok: true, rebuildQueued: true, clusters: adminClusterPayload(), csrf });
   }
 
   const appealResolveMatch = url.pathname.match(/^\/api\/admin\/appeals\/([^/]+)\/resolve$/);
@@ -3011,8 +3078,7 @@ async function handleAdminApi(req, res, url) {
     const header = ["id", "identity_id", "nickname", "excluded_from_board", "status", "theta", "se",
       "raw_ability_index", "reported_ability_index", "correct_count", "answer_count",
       "timeout_count", "below_reportable_threshold", "stop_reason", "started_at", "finished_at"];
-    const escape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const csv = [header.join(","), ...rows.map((r) => header.map((h) => escape(r[h])).join(","))].join("\n");
+    const csv = [header.join(","), ...rows.map((r) => header.map((h) => csvCell(r[h])).join(","))].join("\n");
     return text(res, 200, csv, "text/csv;charset=utf-8", {
       "Content-Disposition": `attachment; filename="attempts-${new Date().toISOString().slice(0, 10)}.csv"`,
     });
@@ -3027,6 +3093,18 @@ async function handleAdminApi(req, res, url) {
 
 async function router(req, res) {
   try {
+    // OPS-002：内部健康检查（仅 localhost，供容器 healthcheck 用，不在公开/管理域名暴露）
+    if (req.method === "GET" && isLoopbackHealthRequest(req)) {
+      const _p = req.url.split("?")[0];
+      if (_p === "/health/live") return json(res, 200, { status: "live" });
+      if (_p === "/health/ready") {
+        try {
+          db.prepare("SELECT 1").get();
+          const ok = !practiceService || !!practiceService.getCurrentBank();
+          return ok ? json(res, 200, { status: "ready" }) : json(res, 503, { status: "starting" });
+        } catch (e) { return json(res, 503, { status: "unhealthy" }); }
+      }
+    }
     if (IS_PROD && !isKnownHost(req)) {
       return text(res, 421, "Misdirected Request", "text/plain;charset=utf-8", { "Cache-Control": "no-store" });
     }
@@ -3099,6 +3177,10 @@ async function router(req, res) {
     let extraHeaders = {};
     const identityPages = new Set(["portal.html", "practice.html", "user.html"]);
     if (req.method === "GET" && !adminHost && identityPages.has(path.basename(filePath)) && !getIdentity(req)) {
+      const identityCreateLimit = checkRateLimit(req, "identity_create", CONFIG.identityCreateRateLimitPerHour, 60 * 60);
+      if (!identityCreateLimit.allowed) {
+        return json(res, 429, { error: "身份创建请求过于频繁，请稍后再试。", retryAfterSeconds: identityCreateLimit.retryAfterSeconds }, { "Retry-After": String(identityCreateLimit.retryAfterSeconds) });
+      }
       mintIdentity(req, res);
       if (res.__identityCookie) extraHeaders = { "Set-Cookie": res.__identityCookie };
     }
@@ -3130,11 +3212,16 @@ practiceService = createPracticeService({
   deviceHash,
 });
 practiceService.init();
-try { rebuildIdentityClusters(true); } catch (err) { console.error("[cluster] startup rebuild failed", err.message); }
+markClusterRebuildDirty();
+processClusterRebuildJob();
 
 const server = http.createServer((req, res) => {
   router(req, res);
 });
+// OPS-002：HTTP 超时，防止慢速/挂起连接长期占用事件循环与连接
+server.requestTimeout = 30000;
+server.headersTimeout = 25000;
+server.keepAliveTimeout = 65000;
 
 server.listen(PORT, HOST, () => {
   console.log(`Adaptive test app listening on ${HOST}:${PORT}`);
@@ -3196,3 +3283,5 @@ function sweepActiveAttempts() {
 
 sweepActiveAttempts(); // collect existing zombie sessions on startup
 setInterval(sweepActiveAttempts, CONFIG.sweepIntervalSeconds * 1000);
+setInterval(pruneRateLimitBuckets, 60 * 1000);    // SEC-003：定期清理过期限流桶
+setInterval(processClusterRebuildJob, 30 * 1000); // PERF-001：合并执行后台聚类重建

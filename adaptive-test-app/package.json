@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "NODE_ENV=development node src/server.js",
-    "check": "node --check src/server.js && node --check src/practice.js && node --check scripts/backup-db.mjs && node --check public/portal.js && node --check public/practice.js && node --check public/practice-tiles.js && node --check public/admin.js && node --check public/user.js",
+    "check": "node --check src/server.js && node --check src/practice.js && node --check src/maintenance.js && node --check scripts/backup-db.mjs && node --check public/portal.js && node --check public/practice.js && node --check public/practice-tiles.js && node --check public/admin.js && node --check public/user.js",
     "test": "node --test tests/*.test.mjs"
   },
   "engines": {

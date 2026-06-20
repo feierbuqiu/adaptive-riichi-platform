@@ -81,6 +81,36 @@ Updated: 2026-06-20
   without storing complete IP addresses or authentication material.
 - Evaluate only no-ICP, low-cost Hong Kong or international routing options.
 
+## Status snapshot - 2026-06-20
+
+The roadmap is not fully complete. The current pre-commit implementation has
+closed or materially advanced the code-side P0 work:
+
+- the public repository has an allowlist, ignored runtime artifacts, and an
+  SSH-signed baseline commit;
+- rate limiting now has global, endpoint, trusted-client-IP, and authenticated
+  identity layers, bounded state, expiry cleanup, and a dedicated anonymous
+  identity-creation limit;
+- identity clustering is no longer rebuilt in public request paths, uses
+  indexed candidate generation instead of a full Cartesian comparison, and has
+  time, pair-count, retry, and single-run bounds;
+- CSV exports neutralize spreadsheet formulas;
+- private liveness/readiness checks, HTTP timeouts, container resource limits,
+  bounded logs, a read-only application root, and an explicit temporary mount
+  are represented in the public deployment template and passed an isolated
+  Docker image smoke test;
+- the automated suite covers these controls and the existing practice rules.
+
+Remaining P0 release work requires operator or production access: relocate and
+rotate synchronized credentials, add an outer access-control layer to the admin
+hostname, deploy the current revision, and complete post-deployment smoke and
+rollback checks. Signed annotated release tags and per-release evidence records
+are also not yet in place.
+
+P1 remains active: immutable migrations, broader API/security/backup/restore
+coverage, incremental modularization, automated zero-downtime delivery,
+scheduled backup/restore drills, and production observability are not complete.
+
 ## Upgrade triggers
 
 PostgreSQL, Redis, multi-host deployment, or a paid acceleration network require
