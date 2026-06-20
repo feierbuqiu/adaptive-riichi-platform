@@ -128,9 +128,8 @@ access control are explicitly out of scope by owner decision. They are accepted
 operational constraints rather than open release blockers. The current release
 evidence is recorded in `docs/releases/2026-06-20-e3af346.md`.
 
-P1 is now partially delivered; see the dated progress section below. Automated
-zero-downtime delivery (expand/contract overlap with drain and auto-rollback) and
-production observability remain the main open P1 items.
+P1 is now delivered; see the dated progress sections below. The remaining work is
+the inherently incremental tail of modularization and unified API conventions.
 
 ## P1 progress - 2026-06-20
 
@@ -161,12 +160,42 @@ host (release `release-2026-06-20-roadmap-p1`, content-addressed image
 - **Release tooling.** `scripts/smoke-test.mjs` codifies the externally observable
   security boundaries and gates the deploy.
 
-Open P1 items: automated zero-downtime delivery (build-before-switch, overlapping
-revisions with request drain, automatic rollback on smoke failure — the current
-deploy is single-container recreate with health-gated rollback) and production
-observability (structured request telemetry, same-origin Web Vitals, and resource
-alerting). The release evidence is recorded in
-`docs/releases/2026-06-20-roadmap-p1.md`.
+The release evidence is recorded in `docs/releases/2026-06-20-roadmap-p1.md`.
+
+## P1 completion - 2026-06-21
+
+The two remaining P1 items are now delivered and deployed (release
+`release-2026-06-21-roadmap-p1-complete`, image `sha256:4d51947d…`).
+
+### Production observability (OPS-005)
+
+- **Structured request logging.** Every request carries an id (surfaced as the
+  `X-Request-Id` response header and in the `{error, code, requestId}` 500 envelope)
+  and emits one redacted JSON access line — coarse route shape, status, latency, and
+  country only; never cookies, tokens, bodies, or full IP addresses.
+- **Same-origin Web Vitals.** `public/rum.js` collects LCP/CLS/INP and a failure
+  stage and posts them on page-hide via `sendBeacon` to an anonymous, rate-limited
+  `/api/rum` endpoint, wrapped end to end so telemetry never blocks a page or an
+  answer submission. Events store coarse dimensions (region, CDN POP, browser
+  family) with no IP or auth material, on a 30-day bounded retention.
+- **Resource/error monitoring.** A 5-minute `systemd` timer records container
+  health and restarts, CPU/memory, disk, recent HTTP 5xx, and slow-request counts as
+  a structured log, flagging threshold breaches.
+
+### Zero-downtime delivery (OPS-003)
+
+- Builds and verifies the new image before switching, uses backward-compatible
+  expand/contract migrations, automatically rolls back on a failed health or smoke
+  check, preserves server-side sessions (shared SQLite), and elects a single leader
+  for the sweeper and cluster rebuild so overlapping revisions never duplicate
+  singleton jobs (`PRAGMA busy_timeout` covers brief write contention).
+- The single host (1 GB RAM) cannot run two full app replicas, so the reverse proxy
+  drains and retries requests across the container swap instead of load-balancing two
+  replicas. Measured during a live swap: **130/130 requests succeeded, zero lost** —
+  the user-side "zero lost committed answers" objective.
+
+The release evidence is recorded in
+`docs/releases/2026-06-21-roadmap-p1-complete.md`.
 
 ## Upgrade triggers
 

@@ -18,7 +18,14 @@ http://example.com, https://example.com, http://admin.example.com, https://admin
 		X-Permitted-Cross-Domain-Policies "none"
 	}
 
-	reverse_proxy app:3000
+	# OPS-003 zero-downtime delivery: during a deploy the app container is recreated;
+	# draining + retrying holds in-flight and new requests until the replacement is
+	# listening, so no request is dropped (zero lost committed answers) on a single-host
+	# deployment that cannot run two full app replicas.
+	reverse_proxy app:3000 {
+		lb_try_duration 10s
+		lb_try_interval 250ms
+	}
 }
 
 :80, :443 {
