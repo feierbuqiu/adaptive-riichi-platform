@@ -128,9 +128,45 @@ access control are explicitly out of scope by owner decision. They are accepted
 operational constraints rather than open release blockers. The current release
 evidence is recorded in `docs/releases/2026-06-20-e3af346.md`.
 
-P1 remains active: immutable migrations, broader API/security/backup/restore
-coverage, incremental modularization, automated zero-downtime delivery,
-scheduled backup/restore drills, and production observability are not complete.
+P1 is now partially delivered; see the dated progress section below. Automated
+zero-downtime delivery (expand/contract overlap with drain and auto-rollback) and
+production observability remain the main open P1 items.
+
+## P1 progress - 2026-06-20
+
+The following P1 work is implemented, tested, and deployed to the single production
+host (release `release-2026-06-20-roadmap-p1`, content-addressed image
+`sha256:e6a1f376…`):
+
+- **Continuous integration.** `.github/workflows/ci.yml` runs the syntax check, a
+  fresh-database migration check, and the full test suite on every push and pull
+  request, plus a public-tree guard that fails if any secret, key, database,
+  backup, or private-bank file is ever tracked.
+- **Ordered immutable migrations.** Schema is created and recorded through
+  `migrations/001_core.sql` and `migrations/002_practice.sql` via a checksum-guarded
+  runner with a `schema_migrations` ledger. Applying the baseline to the existing
+  production database was an idempotent no-op that preserved all data; a modified
+  applied migration is rejected. `scripts/migrate.mjs` provides apply/status/check.
+- **Expanded test matrix.** Coverage grew from 15 to 25 automated tests, adding
+  migration idempotency/baseline/immutability, backup-and-restore round trips, and
+  HTTP integration tests for per-identity CSRF, identity isolation, and oversized
+  input resilience.
+- **Scheduled backups and a verified restore drill.** A nightly systemd timer runs
+  a consistent SQLite backup followed by an automated restore-and-integrity check
+  (`scripts/restore-check.mjs`), with bounded retention. The drill has run
+  successfully against live production data.
+- **Incremental modularization.** Runtime configuration was extracted into
+  `src/config.js` behind the full test suite; further extraction of repositories,
+  domain modules, and jobs remains sequenced for later increments.
+- **Release tooling.** `scripts/smoke-test.mjs` codifies the externally observable
+  security boundaries and gates the deploy.
+
+Open P1 items: automated zero-downtime delivery (build-before-switch, overlapping
+revisions with request drain, automatic rollback on smoke failure — the current
+deploy is single-container recreate with health-gated rollback) and production
+observability (structured request telemetry, same-origin Web Vitals, and resource
+alerting). The release evidence is recorded in
+`docs/releases/2026-06-20-roadmap-p1.md`.
 
 ## Upgrade triggers
 

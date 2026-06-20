@@ -27,7 +27,9 @@ created data conforming to the documented schemas.
 ## Repository layout
 
 ```text
+.github/workflows/      Continuous integration (checks, migration check, tests, tree guard)
 app/                     Application source, browser clients, scripts, and tests
+app/migrations/          Ordered, immutable SQL schema migrations
 assets/mahjong-tiles/   Public Mahjong SVG assets and demos
 deploy/                  Public Caddy and Docker Compose templates
 docs/                    Data contracts and signed-release evidence
@@ -39,8 +41,12 @@ examples/                Safe example runtime data
 ```bash
 cd app
 npm run check
+npm run migrate:check
 npm test
 ```
+
+Migrations are applied automatically on startup and can be inspected or applied
+explicitly with `npm run migrate:status` and `npm run migrate`.
 
 Copy `app/.env.example` to `app/.env`, provide a private practice bank and any
 optional examination assets, then use `deploy/docker-compose.example.yml` as
