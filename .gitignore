@@ -14,6 +14,7 @@
 !/svg-tiles/
 !/examples/
 !/docs/
+!/release-evidence/
 
 # Runtime and local-development state must never be published.
 /adaptive-test-app/.env

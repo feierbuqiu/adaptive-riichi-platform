@@ -96,8 +96,8 @@ Updated: 2026-06-20
 
 ## Status snapshot - 2026-06-20
 
-The roadmap is not fully complete. The current pre-commit implementation has
-closed or materially advanced the code-side P0 work:
+The roadmap is not fully complete. The current release has closed the P0 work
+required for the present single-host deployment:
 
 - the public repository has an allowlist, ignored runtime artifacts, and an
   SSH-signed baseline commit;
@@ -112,13 +112,21 @@ closed or materially advanced the code-side P0 work:
   bounded logs, a read-only application root, and an explicit temporary mount
   are represented in the public deployment template and passed an isolated
   Docker image smoke test;
-- the automated suite covers these controls and the existing practice rules.
+- administrator login now adds account-bound failure limits, uniform failure
+  responses, bounded inputs, login audit events, and production `__Host-`
+  session cookies without introducing a browser challenge;
+- the automated suite covers these controls and the existing practice rules;
+- release `release-2026-06-20-e3af346` is signed and GitHub-verified, the
+  content-addressed image is deployed, the database and previous source/image
+  have rollback points, and post-deployment user/admin route checks passed;
+- the production application container now enforces the tested read-only root,
+  temporary mount, dropped capabilities, PID limit, and no-new-privileges
+  boundary.
 
 Credential rotation, OneDrive relocation, and Cloudflare browser-interstitial
-access control are explicitly out of scope by owner decision. Remaining P0
-release work is to deploy the current revision and complete post-deployment
-smoke and rollback checks. Signed annotated release tags and per-release
-evidence records are also not yet in place.
+access control are explicitly out of scope by owner decision. They are accepted
+operational constraints rather than open release blockers. The current release
+evidence is recorded in `release-evidence/2026-06-20-e3af346.md`.
 
 P1 remains active: immutable migrations, broader API/security/backup/restore
 coverage, incremental modularization, automated zero-downtime delivery,
