@@ -23,6 +23,7 @@ const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, "app.sqlite");
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "0.0.0.0";
 const IS_PROD = process.env.NODE_ENV === "production";
+const ADMIN_SESSION_COOKIE = IS_PROD ? "__Host-admin_session" : "admin_session";
 
 function envList(name, fallback) {
   return String(process.env[name] || fallback || "")
@@ -63,6 +64,8 @@ const CONFIG = {
   clusterRebuildMaxPairs: Number(process.env.CLUSTER_REBUILD_MAX_PAIRS) || 100000,
   clusterRebuildMaxMs: Number(process.env.CLUSTER_REBUILD_MAX_MS) || 5000,
   clusterRebuildMaxRetries: Number(process.env.CLUSTER_REBUILD_MAX_RETRIES) || 3,
+  adminLoginAccountFailureLimit: Number(process.env.ADMIN_LOGIN_ACCOUNT_FAILURE_LIMIT) || 30,
+  adminLoginAccountWindowMinutes: Number(process.env.ADMIN_LOGIN_ACCOUNT_WINDOW_MINUTES) || 15,
   examEnabled: String(process.env.EXAM_ENABLED || "false").toLowerCase() === "true",
   publicHostnames: envList("PUBLIC_HOSTNAMES", "localhost,127.0.0.1"),
   adminHostnames: envList("ADMIN_HOSTNAMES", "admin.localhost"),
@@ -336,6 +339,14 @@ function checkRateLimit(req, scope, limit, windowSeconds) {
   ];
   if (identityId) rules.push({ key: `identity:${scope}:${identityId}`, limit, layer: "identity" });
   return rateLimiter.consume(rules, windowSeconds);
+}
+
+function adminLoginAccountRule(username) {
+  return {
+    key: `subject:admin_login:${hmac(String(username || "").trim().toLowerCase())}`,
+    limit: CONFIG.adminLoginAccountFailureLimit,
+    layer: "account",
+  };
 }
 
 // PERF-001：聚类重建移出请求链——指纹/申诉只标记“需要重算”，由单实例后台任务合并执行
@@ -899,7 +910,7 @@ function requireIdentity(req, res) {
 
 function requireAdmin(req, res) {
   const cookies = parseCookies(req.headers.cookie);
-  const value = cookies["admin_session"];
+  const value = cookies[ADMIN_SESSION_COOKIE];
   if (!value || !value.includes(".")) {
     json(res, 401, { error: "请先登录管理员账号。" });
     return null;
@@ -926,7 +937,7 @@ function requireAdmin(req, res) {
 
 function getAdminSession(req) {
   const cookies = parseCookies(req.headers.cookie);
-  const value = cookies["admin_session"];
+  const value = cookies[ADMIN_SESSION_COOKIE];
   if (!value || !value.includes(".")) return null;
   const [sid, raw] = value.split(".");
   const session = db.prepare("SELECT * FROM admin_sessions WHERE id = ?").get(sid);
@@ -2668,9 +2679,24 @@ async function handleAdminApi(req, res, url) {
       return json(res, 429, { error: "登录尝试过于频繁，请稍后再试。" }, { "Retry-After": String(limited.retryAfterSeconds) });
     }
     const body = await readJson(req);
-    const admin = db.prepare("SELECT * FROM admin_users WHERE username = ? AND disabled = 0").get(String(body.username || ""));
-    const ok = admin && verifyPassword(body.password || "", admin.password_hash) && verifyTotp(admin.totp_secret, body.totp || "");
+    const username = typeof body.username === "string" ? body.username.trim() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    const totp = typeof body.totp === "string" ? body.totp.trim() : "";
+    if (!username || username.length > 128 || password.length > 1024 || totp.length > 16) {
+      return json(res, 400, { error: "管理员登录参数无效。" });
+    }
+    const accountRule = adminLoginAccountRule(username);
+    const accountLimit = rateLimiter.check([accountRule]);
+    if (!accountLimit.allowed) {
+      return json(res, 429, { error: "登录尝试过于频繁，请稍后再试。" }, { "Retry-After": String(accountLimit.retryAfterSeconds) });
+    }
+    const admin = db.prepare("SELECT * FROM admin_users WHERE username = ? AND disabled = 0").get(username);
+    const ok = admin && verifyPassword(password, admin.password_hash) && verifyTotp(admin.totp_secret, totp);
     if (!ok) {
+      const failureLimit = rateLimiter.consume([accountRule], CONFIG.adminLoginAccountWindowMinutes * 60);
+      if (!failureLimit.allowed) {
+        return json(res, 429, { error: "登录尝试过于频繁，请稍后再试。" }, { "Retry-After": String(failureLimit.retryAfterSeconds) });
+      }
       return json(res, 401, { error: "管理员登录失败。" });
     }
     const raw = crypto.randomBytes(32).toString("hex");
@@ -2679,13 +2705,15 @@ async function handleAdminApi(req, res, url) {
     const expires = new Date(nowMs() + 1000 * 60 * 60 * 8).toISOString();
     db.prepare("INSERT INTO admin_sessions (id, admin_user_id, session_hash, csrf_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
       .run(sid, admin.id, sha(raw), csrf, nowIso(), expires, nowIso());
-    return json(res, 200, { loggedIn: true, csrf }, { "Set-Cookie": adminCookie("admin_session", `${sid}.${raw}`, { maxAge: 60 * 60 * 8 }) });
+    db.prepare("INSERT INTO audit_logs (id, actor_type, actor_id, action, target_type, target_id, details_json, created_at) VALUES (?, 'admin', ?, 'admin_login', 'admin_session', ?, ?, ?)")
+      .run(id("aud"), admin.id, sid, JSON.stringify({ ipPrefixHash: hmac(ipPrefixOf(clientIp(req))) }), nowIso());
+    return json(res, 200, { loggedIn: true, csrf }, { "Set-Cookie": adminCookie(ADMIN_SESSION_COOKIE, `${sid}.${raw}`, { maxAge: 60 * 60 * 8 }) });
   }
   if (req.method === "POST" && url.pathname === "/api/admin/logout") {
     const admin = requireAdmin(req, res);
     if (!admin) return;
     db.prepare("DELETE FROM admin_sessions WHERE id = ?").run(admin.__session.id);
-    return json(res, 200, { ok: true }, { "Set-Cookie": clearCookie("admin_session", true) });
+    return json(res, 200, { ok: true }, { "Set-Cookie": clearCookie(ADMIN_SESSION_COOKIE, true) });
   }
 
   const admin = requireAdmin(req, res);

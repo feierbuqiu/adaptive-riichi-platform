@@ -20,6 +20,23 @@ class FixedWindowRateLimiter {
     return this.buckets.size;
   }
 
+  check(rules) {
+    const now = this.now();
+    for (const rule of rules || []) {
+      const key = String(rule?.key || "");
+      const limit = Math.floor(Number(rule?.limit));
+      if (!key || !Number.isFinite(limit) || limit <= 0) continue;
+      const bucket = this.buckets.get(key);
+      if (!bucket || bucket.resetAt <= now || bucket.count < limit) continue;
+      return {
+        allowed: false,
+        retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+        limitedBy: rule.layer || key,
+      };
+    }
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+
   consume(rules, windowSeconds) {
     const now = this.now();
     const windowMs = Math.max(1, Number(windowSeconds) || 1) * 1000;

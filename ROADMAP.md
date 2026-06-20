@@ -10,6 +10,12 @@ Updated: 2026-06-20
 - Keep all proprietary questions, answers, research data, statistics, and user
   records outside the public repository.
 - Do not depend on CAPTCHA or browser challenges for normal or abusive traffic.
+- Do not enable Cloudflare Challenge, Turnstile, Access login pages, or any
+  browser-interstitial verification on user or administrator paths; mainland
+  China reachability takes priority over that control.
+- Keep the current credentials and OneDrive layout unchanged unless the owner
+  explicitly reopens credential rotation or storage migration. Treat this as
+  an accepted operational risk, not an unfinished release task.
 - Do not use a mainland-China deployment or CDN product that requires ICP filing.
 - Keep optional acceleration and monitoring spend within CNY 0-20 per month.
 - Real-user monitoring must be same-origin, asynchronous, failure-tolerant, and
@@ -48,6 +54,13 @@ Updated: 2026-06-20
 - Move toward a read-only container root filesystem with explicit writable data
   and temporary mounts.
 - Add spreadsheet-formula neutralization to every CSV export.
+
+### Administrator protection without challenges
+
+- Keep the administrator hostname isolated from public user paths.
+- Retain password, TOTP, strict CSRF checks, audit logs, and `__Host-` cookies.
+- Bound login attempts by source and account with server-side `429` responses;
+  do not fall back to browser challenges or CAPTCHA.
 
 ## P1 - High-frequency delivery
 
@@ -101,11 +114,11 @@ closed or materially advanced the code-side P0 work:
   Docker image smoke test;
 - the automated suite covers these controls and the existing practice rules.
 
-Remaining P0 release work requires operator or production access: relocate and
-rotate synchronized credentials, add an outer access-control layer to the admin
-hostname, deploy the current revision, and complete post-deployment smoke and
-rollback checks. Signed annotated release tags and per-release evidence records
-are also not yet in place.
+Credential rotation, OneDrive relocation, and Cloudflare browser-interstitial
+access control are explicitly out of scope by owner decision. Remaining P0
+release work is to deploy the current revision and complete post-deployment
+smoke and rollback checks. Signed annotated release tags and per-release
+evidence records are also not yet in place.
 
 P1 remains active: immutable migrations, broader API/security/backup/restore
 coverage, incremental modularization, automated zero-downtime delivery,

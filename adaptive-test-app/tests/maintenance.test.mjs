@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import { once } from "node:events";
 import fs from "node:fs";
 import http from "node:http";
@@ -8,6 +9,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { DatabaseSync } from "node:sqlite";
 
 const require = createRequire(import.meta.url);
 const {
@@ -52,6 +54,16 @@ test("fixed-window limiter rejects new state when its hard capacity is full", ()
     retryAfterSeconds: 60,
     limitedBy: "capacity",
   });
+});
+
+test("fixed-window limiter can reject blocked subjects without incrementing them", () => {
+  const limiter = new FixedWindowRateLimiter({ maxKeys: 10, now: () => 0 });
+  const rule = { key: "subject:admin:hashed", limit: 2, layer: "account" };
+  assert.equal(limiter.check([rule]).allowed, true);
+  assert.equal(limiter.consume([rule], 900).allowed, true);
+  assert.equal(limiter.consume([rule], 900).allowed, true);
+  assert.deepEqual(limiter.check([rule]), { allowed: false, retryAfterSeconds: 900, limitedBy: "account" });
+  assert.equal(limiter.size, 1);
 });
 
 test("cluster candidates use indexed signals instead of a full Cartesian scan", () => {
@@ -99,18 +111,41 @@ function reservePort() {
   });
 }
 
-function request(port, host, pathname) {
+function request(port, host, pathname, options = {}) {
   return new Promise((resolve, reject) => {
-    const req = http.get({ hostname: "127.0.0.1", port, path: pathname, headers: { Host: host } }, (res) => {
+    const body = options.body == null
+      ? null
+      : (typeof options.body === "string" ? options.body : JSON.stringify(options.body));
+    const headers = { Host: host, ...(options.headers || {}) };
+    if (body != null) {
+      headers["Content-Type"] = headers["Content-Type"] || "application/json";
+      headers["Content-Length"] = Buffer.byteLength(body);
+    }
+    const req = http.request({ hostname: "127.0.0.1", port, path: pathname, method: options.method || "GET", headers }, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") }));
     });
     req.on("error", reject);
+    if (body != null) req.write(body);
+    req.end();
   });
 }
 
-test("server enforces private health routes and anonymous identity creation limits", { timeout: 20000 }, async (t) => {
+function totp(secret) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const char of secret.replace(/=+$/g, "").toUpperCase()) bits += alphabet.indexOf(char).toString(2).padStart(5, "0");
+  const bytes = [];
+  for (let index = 0; index + 8 <= bits.length; index += 8) bytes.push(parseInt(bits.slice(index, index + 8), 2));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)));
+  const digest = crypto.createHmac("sha1", Buffer.from(bytes)).update(counter).digest();
+  const offset = digest[digest.length - 1] & 0xf;
+  return ((digest.readUInt32BE(offset) & 0x7fffffff) % 1000000).toString().padStart(6, "0");
+}
+
+test("server enforces health, host, admin-auth, CSRF, and abuse boundaries", { timeout: 20000 }, async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "adaptive-maintenance-"));
   const bankRoot = path.join(root, "practice-bank");
   fs.mkdirSync(bankRoot);
@@ -141,6 +176,8 @@ test("server enforces private health routes and anonymous identity creation limi
       SESSION_SECRET: "test-session-secret-at-least-32-characters",
       ADMIN_USERNAME: "admin",
       ADMIN_PASSWORD: "test-admin-password",
+      ADMIN_TOTP_SECRET: "JBSWY3DPEHPK3PXP",
+      ADMIN_LOGIN_ACCOUNT_FAILURE_LIMIT: "2",
       IDENTITY_CREATE_RATE_LIMIT_PER_HOUR: "1",
       GLOBAL_RATE_LIMIT_PER_MINUTE: "10000",
     },
@@ -178,4 +215,64 @@ test("server enforces private health routes and anonymous identity creation limi
   const secondIdentity = await request(port, `127.0.0.1:${port}`, "/api/user/me");
   assert.equal(secondIdentity.status, 429, secondIdentity.body);
   assert.match(secondIdentity.body, /身份创建请求过于频繁/);
+
+  assert.equal((await request(port, `127.0.0.1:${port}`, "/admin")).status, 404);
+  assert.equal((await request(port, "admin.localhost", "/api/user/me")).status, 404);
+  assert.equal((await request(port, `127.0.0.1:${port}`, "/api/attempts/start", { method: "POST" })).status, 403);
+  const adminMe = await request(port, "admin.localhost", "/api/admin/me");
+  assert.equal(adminMe.status, 200);
+  assert.equal(JSON.parse(adminMe.body).loggedIn, false);
+
+  const invalidBody = { username: "missing-admin", password: "wrong", totp: "000000" };
+  const firstInvalid = await request(port, "admin.localhost", "/api/admin/login", {
+    method: "POST", body: invalidBody, headers: { "CF-Connecting-IP": "198.51.100.1" },
+  });
+  assert.equal(firstInvalid.status, 401);
+  assert.equal((await request(port, "admin.localhost", "/api/admin/login", {
+    method: "POST", body: invalidBody, headers: { "CF-Connecting-IP": "198.51.100.2" },
+  })).status, 401);
+  const blockedLogin = await request(port, "admin.localhost", "/api/admin/login", {
+    method: "POST", body: invalidBody, headers: { "CF-Connecting-IP": "198.51.100.3" },
+  });
+  assert.equal(blockedLogin.status, 429);
+  assert.ok(Number(blockedLogin.headers["retry-after"]) > 0);
+
+  const wrongExistingAdmin = await request(port, "admin.localhost", "/api/admin/login", {
+    method: "POST",
+    body: { username: "admin", password: "wrong", totp: "000000" },
+    headers: { "CF-Connecting-IP": "198.51.100.4" },
+  });
+  assert.equal(wrongExistingAdmin.status, 401);
+  assert.equal(wrongExistingAdmin.body, firstInvalid.body);
+
+  const login = await request(port, "admin.localhost", "/api/admin/login", {
+    method: "POST",
+    body: { username: "admin", password: "test-admin-password", totp: totp("JBSWY3DPEHPK3PXP") },
+  });
+  assert.equal(login.status, 200, login.body);
+  const loginBody = JSON.parse(login.body);
+  const setCookie = login.headers["set-cookie"]?.[0] || "";
+  assert.match(setCookie, /^__Host-admin_session=/);
+  assert.match(setCookie, /; Path=\//);
+  assert.match(setCookie, /; HttpOnly/);
+  assert.match(setCookie, /; SameSite=Strict/);
+  assert.match(setCookie, /; Secure/);
+  assert.doesNotMatch(setCookie, /; Domain=/i);
+  const sessionCookie = setCookie.split(";")[0];
+  const auditDb = new DatabaseSync(path.join(root, "app.sqlite"), { readOnly: true });
+  const loginAudit = auditDb.prepare("SELECT actor_type, action, target_type FROM audit_logs WHERE action = 'admin_login' ORDER BY created_at DESC LIMIT 1").get();
+  auditDb.close();
+  assert.deepEqual({ ...loginAudit }, { actor_type: "admin", action: "admin_login", target_type: "admin_session" });
+
+  const rejectedLogout = await request(port, "admin.localhost", "/api/admin/logout", {
+    method: "POST",
+    headers: { Cookie: sessionCookie },
+  });
+  assert.equal(rejectedLogout.status, 403);
+  const logout = await request(port, "admin.localhost", "/api/admin/logout", {
+    method: "POST",
+    headers: { Cookie: sessionCookie, "X-CSRF-Token": loginBody.csrf },
+  });
+  assert.equal(logout.status, 200, logout.body);
+  assert.match(logout.headers["set-cookie"]?.[0] || "", /^__Host-admin_session=/);
 });
