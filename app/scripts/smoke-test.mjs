@@ -51,6 +51,12 @@ const checks = [
   { name: "user practice 200", run: () => request("/practice", { host: publicHost }), expect: (r) => r.status === 200 },
   { name: "admin path on user host 404", run: () => request("/admin", { host: publicHost }), expect: (r) => r.status === 404 },
   { name: "user write without CSRF 403", run: () => request("/api/attempts/start", { host: publicHost, method: "POST" }), expect: (r) => r.status === 403 },
+  // Tile assets must actually serve at the origin — catches a missing/mis-mounted tile
+  // directory (covers a number, a sou, and an honor tile). Run against the origin (not a
+  // CDN) so cache hits cannot mask a broken backend.
+  { name: "tile asset 1man 200", run: () => request("/practice-tiles/1man.svg", { host: publicHost }), expect: (r) => r.status === 200 },
+  { name: "tile asset 1sou 200", run: () => request("/practice-tiles/1sou.svg", { host: publicHost }), expect: (r) => r.status === 200 },
+  { name: "tile asset honor (tan) 200", run: () => request("/practice-tiles/tan.svg", { host: publicHost }), expect: (r) => r.status === 200 },
 ];
 
 if (adminHost) {
