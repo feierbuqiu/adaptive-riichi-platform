@@ -1,9 +1,7 @@
-# 立直麻将牌面（基于开源素材，独立增强分支）
-
-> ⚠️ 隔离分支：与已部署的 `adaptive-test-app/` 完全独立——不在部署包、不被挂载、不影响线上。完善后再考虑合并。
+# 立直麻将牌面（开源素材）
 
 ## 是什么
-直接使用第三方**开源 CC0/公有领域**立直牌面 SVG 素材（位于 `simple_tiles/`，含牌框/白板/牌背/点棒），由 `tiles.js` 做「编码 → 素材文件」的映射渲染。素材授权见 [NOTICE.md](NOTICE.md)。
+直接使用第三方**开源 CC0/公有领域**立直牌面 SVG 素材（位于 `tiles/`，含牌框/白板/牌背/点棒），由 `tiles.js` 做「编码 → 素材文件」的映射渲染。素材授权见 [NOTICE.md](NOTICE.md)。
 
 ## 编码
 - `m` 万子 / `p` 筒子 / `s` 索子 / `z` 字牌
@@ -16,7 +14,7 @@
 <script>
   el.innerHTML = MJTiles.img("0m", { width: 60 });   // -> <img ...> 引用素材文件
   MJTiles.file("1z");                                  // -> "tan"（素材文件名）
-  MJTiles.src("5p");                                   // -> "simple_tiles/5pin.svg"
+  MJTiles.src("5p");                                   // -> "tiles/5pin.svg"
   MJTiles.parseHand("123m0p77z");                      // -> ["1m","2m","3m","0p","7z","7z"]
 </script>
 ```
@@ -27,4 +25,4 @@
 
 ## 备注
 - 字牌 `tan=东(1z)`、`xia=西(3z)` 已通过渲染截图确认；如需对调，改 `HONOR` 一行即可。
-- `simple_images/`（仅牌面符号、无白板）未使用；统一用完整的 `simple_tiles/`。
+- 应用和演示统一使用完整的 `tiles/`。

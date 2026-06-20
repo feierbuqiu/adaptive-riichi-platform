@@ -17,7 +17,7 @@ function randomBase32(chars = 32) {
 const adminUser = process.argv[2] || "admin";
 const totpSecret = randomBase32();
 
-console.log(`# Paste these into adaptive-test-app/.env on the server.`);
+console.log(`# Paste these into app/.env on the server.`);
 console.log(`NODE_ENV=production`);
 console.log(`PORT=3000`);
 console.log(`PUBLIC_ORIGIN=https://example.com`);

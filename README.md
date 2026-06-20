@@ -24,17 +24,27 @@ created data conforming to the documented schemas.
 - Docker Compose deployment
 - Server-side scoring, authorization, rate limiting, and audit controls
 
+## Repository layout
+
+```text
+app/                     Application source, browser clients, scripts, and tests
+assets/mahjong-tiles/   Public Mahjong SVG assets and demos
+deploy/                  Public Caddy and Docker Compose templates
+docs/                    Data contracts and signed-release evidence
+examples/                Safe example runtime data
+```
+
 ## Local checks
 
 ```bash
-cd adaptive-test-app
+cd app
 npm run check
 npm test
 ```
 
-Copy `adaptive-test-app/.env.example` to `.env`, provide a private practice
-bank and any optional examination assets, then use
-`docker-compose.example.yml` as the deployment starting point.
+Copy `app/.env.example` to `app/.env`, provide a private practice bank and any
+optional examination assets, then use `deploy/docker-compose.example.yml` as
+the deployment starting point.
 
 ## Data boundary
 
@@ -51,4 +61,4 @@ authentication key.
 ## License
 
 Application code is released under the MIT License. Third-party Mahjong SVG
-assets retain the terms recorded in `svg-tiles/NOTICE.md`.
+assets retain the terms recorded in `assets/mahjong-tiles/NOTICE.md`.

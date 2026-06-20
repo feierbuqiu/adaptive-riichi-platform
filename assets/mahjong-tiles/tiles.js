@@ -1,11 +1,11 @@
 /*
  * 立直麻将牌面 —— 基于第三方开源 SVG 素材（CC0/公有领域）的映射层。
- * 素材目录默认 ./simple_tiles （完整牌：含牌框/白板/牌背）。
+ * 素材目录默认 ./tiles （完整牌：含牌框/白板/牌背）。
  * 编码：m=万子 p=筒子 s=索子 z=字牌；0m/0p/0s=赤五万/赤⑤饼/赤5索；back=牌背。
  *   1-7z = 东 南 西 北 白 发 中
  * 用法：
  *   MJTiles.file("1z")      -> "tan"            （素材文件名，无扩展名）
- *   MJTiles.src("0m")       -> "simple_tiles/akaman.svg"
+ *   MJTiles.src("0m")       -> "tiles/akaman.svg"
  *   MJTiles.img("5p",{width:60}) -> '<img ...>'
  *   MJTiles.parseHand("123m0p77z") -> ["1m","2m","3m","0p","7z","7z"]
  *
@@ -14,7 +14,7 @@
 (function (global) {
   "use strict";
 
-  var BASE = "simple_tiles";
+  var BASE = "tiles";
   var SUIT = { m: "man", p: "pin", s: "sou" };
   var RED = { m: "akaman", p: "akapin", s: "akasou" };
   // 1东 2南 3西 4北 5白 6发 7中  —— tan=东 / xia=西（已确认）

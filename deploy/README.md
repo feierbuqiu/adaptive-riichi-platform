@@ -10,38 +10,41 @@ This MVP is designed for the cheapest practical AWS setup first:
 
 ## Server Files
 
-Deploy the repository root, not only `adaptive-test-app/`, because the app mounts these root-level assets:
+Deploy the repository root, not only `app/`, because the app mounts these
+root-level assets:
 
 - `private-data/practice-bank/bank.config.json`
 - the private practice JSONL source named by that config
 - optional private examination assets required by your deployment
-- `svg-tiles/simple_tiles/`
+- `assets/mahjong-tiles/tiles/`
 
 The SQLite database is stored at:
 
 ```text
-adaptive-test-app/data/app.sqlite
+private-data/app/app.sqlite
 ```
 
-Do not place `adaptive-test-app/data/` under a public web root.
+Do not place `private-data/app/` under a public web root.
 
 ## First Server Setup
 
 Install Docker and Docker Compose on the EC2 instance, then from the repository root:
 
 ```bash
-node adaptive-test-app/scripts/generate-secrets.mjs admin
-cp adaptive-test-app/.env.example adaptive-test-app/.env
+node app/scripts/generate-secrets.mjs admin
+cp app/.env.example app/.env
 ```
 
-Paste the generated secrets into `adaptive-test-app/.env`, replace `ADMIN_PASSWORD` with a long unique password, and add the generated TOTP secret to an authenticator app.
+Paste the generated secrets into `app/.env`, replace `ADMIN_PASSWORD` with a
+long unique password, and add the generated TOTP secret to an authenticator
+app.
 
 Validate and start:
 
 ```bash
-docker compose config --quiet
-docker compose up -d --build --force-recreate
-docker compose logs -f
+docker compose -f deploy/docker-compose.example.yml config --quiet
+docker compose -f deploy/docker-compose.example.yml up -d --build --force-recreate
+docker compose -f deploy/docker-compose.example.yml logs -f
 ```
 
 Keep `EXAM_ENABLED=false` while only practice mode is public. Verify that `/exam` and the exam APIs return `403` after deployment.
@@ -56,9 +59,10 @@ admin.example.com  A  <EC2 public IPv4>  DNS only initially
 ```
 
 After Caddy has obtained certificates and admin login is verified, the public
-and administrative hosts can be placed behind an approved reverse proxy. Keep
-app-level administrator password, TOTP, CSRF, and session checks enabled even
-when an additional edge control is used.
+and administrative hosts can be placed behind an approved reverse proxy. Do
+not enable browser challenges, CAPTCHA, Turnstile, or an access interstitial.
+Keep app-level administrator password, TOTP, CSRF, rate limits, and session
+checks enabled.
 
 ## EC2 Security Group
 
@@ -77,8 +81,8 @@ If using AWS Systems Manager Session Manager, remove SSH from public inbound rul
 Manual low-cost backup command:
 
 ```bash
-mkdir -p adaptive-test-app/data/backups
-docker compose exec -T app node scripts/backup-db.mjs /var/lib/adaptive-test/backups/app-YYYYMMDD-HHMMSS.sqlite
+mkdir -p private-data/app/backups
+docker compose -f deploy/docker-compose.example.yml exec -T app node scripts/backup-db.mjs /var/lib/adaptive-test/backups/app-YYYYMMDD-HHMMSS.sqlite
 ```
 
 Download the backup file periodically. For longer tests, add a daily cron job and optionally sync the backup directory to a cheap S3 bucket.
@@ -86,10 +90,11 @@ Download the backup file periodically. For longer tests, add a daily cron job an
 ## Updating
 
 ```bash
-docker compose config --quiet
-docker compose build app
-docker compose up -d --force-recreate app caddy
-docker compose ps
+docker compose -f deploy/docker-compose.example.yml config --quiet
+docker compose -f deploy/docker-compose.example.yml build app
+docker compose -f deploy/docker-compose.example.yml up -d --force-recreate app caddy
+docker compose -f deploy/docker-compose.example.yml ps
 ```
 
-Do not delete `adaptive-test-app/data/` unless intentionally wiping all attempts, generated access codes, sessions, and admin data.
+Do not delete `private-data/app/` unless intentionally wiping all attempts,
+generated access codes, sessions, and administrator data.

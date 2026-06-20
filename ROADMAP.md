@@ -126,7 +126,7 @@ required for the present single-host deployment:
 Credential rotation, OneDrive relocation, and Cloudflare browser-interstitial
 access control are explicitly out of scope by owner decision. They are accepted
 operational constraints rather than open release blockers. The current release
-evidence is recorded in `release-evidence/2026-06-20-e3af346.md`.
+evidence is recorded in `docs/releases/2026-06-20-e3af346.md`.
 
 P1 remains active: immutable migrations, broader API/security/backup/restore
 coverage, incremental modularization, automated zero-downtime delivery,

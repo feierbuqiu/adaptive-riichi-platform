@@ -1,7 +1,7 @@
 services:
   app:
     build:
-      context: ./adaptive-test-app
+      context: ../app
     restart: unless-stopped
     mem_limit: 512m
     pids_limit: 256
@@ -25,7 +25,7 @@ services:
       retries: 3
       start_period: 25s
     env_file:
-      - ./adaptive-test-app/.env
+      - ../app/.env
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -34,9 +34,9 @@ services:
       PRACTICE_BANK_ROOT: /opt/adaptive-test-source/practice-bank
       EXAM_ENABLED: "false"
     volumes:
-      - ./private-data/app:/var/lib/adaptive-test
-      - ./private-data/practice-bank:/opt/adaptive-test-source/practice-bank:ro
-      - ./svg-tiles/simple_tiles:/opt/adaptive-test-source/svg-tiles/simple_tiles:ro
+      - ../private-data/app:/var/lib/adaptive-test
+      - ../private-data/practice-bank:/opt/adaptive-test-source/practice-bank:ro
+      - ../assets/mahjong-tiles/tiles:/opt/adaptive-test-source/assets/mahjong-tiles/tiles:ro
     expose:
       - "3000"
 
@@ -54,7 +54,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./deploy/Caddyfile.example:/etc/caddy/Caddyfile:ro
+      - ./Caddyfile.example:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
 

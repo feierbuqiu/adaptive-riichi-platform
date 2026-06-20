@@ -7,27 +7,25 @@
 !/LICENSE
 !/README.md
 !/ROADMAP.md
-!/docker-compose.example.yml
-
-!/adaptive-test-app/
+!/app/
 !/deploy/
-!/svg-tiles/
+!/assets/
 !/examples/
 !/docs/
-!/release-evidence/
 
 # Runtime and local-development state must never be published.
-/adaptive-test-app/.env
-/adaptive-test-app/.env.*
-!/adaptive-test-app/.env.example
-/adaptive-test-app/data/
-/adaptive-test-app/node_modules/
-/adaptive-test-app/*.log
+/app/.env
+/app/.env.*
+!/app/.env.example
+/app/data/
+/app/node_modules/
+/app/*.log
 
 # Only public deployment templates are tracked.
 /deploy/*
 !/deploy/Caddyfile.example
-!/deploy/README_DEPLOYMENT.md
+!/deploy/docker-compose.example.yml
+!/deploy/README.md
 
 # Defense in depth for secrets and generated artifacts at any depth.
 **/secrets/

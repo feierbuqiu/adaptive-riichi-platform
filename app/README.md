@@ -16,7 +16,7 @@ This implementation intentionally avoids external npm dependencies for the first
 Run and verify locally:
 
 ```powershell
-cd adaptive-test-app
+cd app
 npm test
 npm run check
 node src/server.js
@@ -42,16 +42,19 @@ Copy `.env.example` to `.env`, paste the generated secrets, set a strong `ADMIN_
 docker compose up -d --build
 ```
 
-Before every update, back up `adaptive-test-app/data/app.sqlite`. Then validate and recreate the containers so the new read-only mounts are active:
+Before every update, back up `private-data/app/app.sqlite` from the repository
+root. Then validate and recreate the containers so the new read-only mounts are
+active:
 
 ```bash
-docker compose config --quiet
-docker compose build app
-docker compose up -d --force-recreate app caddy
-docker compose ps
+cd ..
+docker compose -f deploy/docker-compose.example.yml config --quiet
+docker compose -f deploy/docker-compose.example.yml build app
+docker compose -f deploy/docker-compose.example.yml up -d --force-recreate app caddy
+docker compose -f deploy/docker-compose.example.yml ps
 ```
 
 Required practice mounts are a private directory containing `bank.config.json`
-and its configured JSONL source, plus `svg-tiles/simple_tiles/`. See
-`docs/PRACTICE_BANK_SCHEMA.md` at the repository root. Keep
+and its configured JSONL source, plus `assets/mahjong-tiles/tiles/`. See
+`docs/practice-bank-schema.md` at the repository root. Keep
 `EXAM_ENABLED=false` until the exam is explicitly opened.

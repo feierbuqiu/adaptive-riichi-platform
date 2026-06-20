@@ -161,6 +161,9 @@ test("server enforces health, host, admin-auth, CSRF, and abuse boundaries", { t
     annotation: { scene: {}, dora_indicators: "1m", hand: "123456789m123p1z", draw: "1z", melds: [] },
     answer: { answer_action: "discard", answer_tile: "1z", public_practice_eligible: true, is_disputed: false },
   })}\n`);
+  const tileRoot = path.join(root, "assets", "mahjong-tiles", "tiles");
+  fs.mkdirSync(tileRoot, { recursive: true });
+  fs.writeFileSync(path.join(tileRoot, "1man.svg"), '<svg xmlns="http://www.w3.org/2000/svg"/>');
   const port = await reservePort();
   const child = spawn(process.execPath, [path.resolve("src/server.js")], {
     cwd: path.resolve("."),
@@ -208,6 +211,10 @@ test("server enforces health, host, admin-auth, CSRF, and abuse boundaries", { t
 
   const fakeLocalHost = await request(port, "localhost.evil", "/health/ready");
   assert.equal(fakeLocalHost.status, 421);
+
+  const tile = await request(port, `127.0.0.1:${port}`, "/practice-tiles/1man.svg");
+  assert.equal(tile.status, 200, tile.body);
+  assert.match(tile.headers["content-type"] || "", /image\/svg\+xml/);
 
   const firstIdentity = await request(port, `127.0.0.1:${port}`, "/api/user/me");
   assert.equal(firstIdentity.status, 200, firstIdentity.body);

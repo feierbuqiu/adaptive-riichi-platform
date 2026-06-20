@@ -3161,7 +3161,7 @@ async function router(req, res) {
     if ((req.method === "GET" || req.method === "HEAD") && practiceTileMatch) {
       const limited = checkRateLimit(req, "practice_asset", CONFIG.assetRateLimitPerMinute, 60);
       if (!limited.allowed) return text(res, 429, "Too many requests", "text/plain;charset=utf-8", { "Retry-After": String(limited.retryAfterSeconds), "Cache-Control": "no-store" });
-      return serveFile(res, path.join(SOURCE_ROOT, "svg-tiles", "simple_tiles", practiceTileMatch[1]), "public, max-age=31536000, immutable", req.method === "HEAD");
+      return serveFile(res, path.join(SOURCE_ROOT, "assets", "mahjong-tiles", "tiles", practiceTileMatch[1]), "public, max-age=31536000, immutable", req.method === "HEAD");
     }
     if (url.pathname.startsWith("/api/admin")) {
       const handled = await handleAdminApi(req, res, url);
