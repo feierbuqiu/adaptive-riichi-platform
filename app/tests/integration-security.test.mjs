@@ -140,4 +140,10 @@ test("user writes enforce per-identity CSRF, identity isolation, and survive ove
   const rumCount = telemetryDb.prepare("SELECT COUNT(*) AS n FROM rum_events").get().n;
   telemetryDb.close();
   assert.equal(rumCount, 1, "exactly the one valid beacon was stored");
+
+  // Phase B: password+TOTP admin login is disabled by default (passkey-only) unless the
+  // ADMIN_PASSWORD_LOGIN break-glass flag is set.
+  const pwLogin = await request(port, "admin.localhost", "/api/admin/login", { method: "POST", body: { username: "admin", password: "x", totp: "000000" } });
+  assert.equal(pwLogin.status, 403, pwLogin.body);
+  assert.equal(JSON.parse(pwLogin.body).code, "PASSWORD_LOGIN_DISABLED");
 });

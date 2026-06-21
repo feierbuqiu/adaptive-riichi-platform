@@ -2276,10 +2276,11 @@ function issueAdminSession(req, res, admin, method) {
 async function handleAdminApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/admin/me") {
     const session = getAdminSession(req);
-    if (!session) return json(res, 200, { loggedIn: false });
-    return json(res, 200, { loggedIn: true, csrf: session.csrf_token });
+    if (!session) return json(res, 200, { loggedIn: false, passwordLogin: CONFIG.adminPasswordLogin });
+    return json(res, 200, { loggedIn: true, csrf: session.csrf_token, passwordLogin: CONFIG.adminPasswordLogin });
   }
   if (req.method === "POST" && url.pathname === "/api/admin/login") {
+    if (!CONFIG.adminPasswordLogin) return json(res, 403, errorBody(req, "PASSWORD_LOGIN_DISABLED", "密码登录已停用，请使用 Passkey 登录。"));
     const limited = checkRateLimit(req, "admin_login", 8, 300);
     if (!limited.allowed) {
       return json(res, 429, { error: "登录尝试过于频繁，请稍后再试。" }, { "Retry-After": String(limited.retryAfterSeconds) });

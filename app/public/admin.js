@@ -547,5 +547,5 @@
   $("#refreshSuspiciousBtn").addEventListener("click", guard(loadSuspicious));
   $("#manualMergeBtn").addEventListener("click", guard(manualMerge));
 
-  api("/api/admin/me").then((me) => { if (me.loggedIn) { state.csrf = me.csrf; afterLogin().catch((e) => toast(e.message, "error")); } }).catch(() => {});
+  api("/api/admin/me").then((me) => { $("#adminLoginForm").hidden = !me.passwordLogin; if (me.loggedIn) { state.csrf = me.csrf; afterLogin().catch((e) => toast(e.message, "error")); } }).catch(() => {});
 })();

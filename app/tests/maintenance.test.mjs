@@ -180,6 +180,7 @@ test("server enforces health, host, admin-auth, CSRF, and abuse boundaries", { t
       ADMIN_USERNAME: "admin",
       ADMIN_PASSWORD: "test-admin-password",
       ADMIN_TOTP_SECRET: "JBSWY3DPEHPK3PXP",
+      ADMIN_PASSWORD_LOGIN: "true",
       ADMIN_LOGIN_ACCOUNT_FAILURE_LIMIT: "2",
       IDENTITY_CREATE_RATE_LIMIT_PER_HOUR: "1",
       GLOBAL_RATE_LIMIT_PER_MINUTE: "10000",

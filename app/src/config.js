@@ -64,6 +64,9 @@ const CONFIG = {
     : envList("ADMIN_HOSTNAMES", "admin.localhost").map((h) => `${IS_PROD ? "https" : "http"}://${h}`),
   adminSessionDays: Number(process.env.ADMIN_SESSION_DAYS) || 60,
   adminRecoveryCodeCount: Number(process.env.ADMIN_RECOVERY_CODE_COUNT) || 10,
+  // Password+TOTP admin login is a disabled-by-default break-glass after passkeys are the
+  // norm. Set ADMIN_PASSWORD_LOGIN=true only to bootstrap a fresh install or recover.
+  adminPasswordLogin: String(process.env.ADMIN_PASSWORD_LOGIN || "false").toLowerCase() === "true",
 };
 
 const SECRET = process.env.SESSION_SECRET || (IS_PROD ? "" : "dev-session-secret-change-me");
