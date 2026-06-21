@@ -10,6 +10,8 @@ const { runMigrations } = require("./migrations");
 const { IS_PROD, CONFIG, SECRET } = require("./config");
 const { createJobLock } = require("./jobs");
 const { newRequestId, routeTemplate, accessLog } = require("./logging");
+const { createSecretBox } = require("./secrets");
+const { cookie, adminCookie, clearCookie, json, text, readJson, errorBody } = require("./http");
 const {
   FixedWindowRateLimiter,
   clusterCandidatePairs,
@@ -98,56 +100,8 @@ function parseCookies(header) {
   return out;
 }
 
-function cookie(name, value, options = {}) {
-  const parts = [`${name}=${encodeURIComponent(value)}`, "Path=/", "HttpOnly", "SameSite=Lax"];
-  if (IS_PROD || options.secure) parts.push("Secure");
-  if (options.maxAge != null) parts.push(`Max-Age=${options.maxAge}`);
-  return parts.join("; ");
-}
-
-function adminCookie(name, value, options = {}) {
-  const parts = [`${name}=${encodeURIComponent(value)}`, "Path=/", "HttpOnly", "SameSite=Strict"];
-  if (IS_PROD || options.secure) parts.push("Secure");
-  if (options.maxAge != null) parts.push(`Max-Age=${options.maxAge}`);
-  return parts.join("; ");
-}
-
-function clearCookie(name, strict = false) {
-  return `${name}=; Path=/; HttpOnly; SameSite=${strict ? "Strict" : "Lax"}; Max-Age=0${IS_PROD ? "; Secure" : ""}`;
-}
-
-function json(res, status, payload, headers = {}) {
-  const body = JSON.stringify(payload);
-  res.writeHead(status, {
-    "Content-Type": "application/json;charset=utf-8",
-    "Content-Length": Buffer.byteLength(body),
-    "Cache-Control": "no-store",
-    ...headers,
-  });
-  res.end(body);
-}
-
-function text(res, status, body, contentType = "text/plain;charset=utf-8", headers = {}) {
-  res.writeHead(status, {
-    "Content-Type": contentType,
-    "Content-Length": Buffer.byteLength(body),
-    ...headers,
-  });
-  res.end(body);
-}
-
-async function readJson(req) {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > 64 * 1024) throw new Error("payload too large");
-    chunks.push(chunk);
-  }
-  if (!chunks.length) return {};
-  const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : {};
-}
+// HTTP response, cookie, and body helpers now live in ./http (imported at the top).
+const totpBox = createSecretBox(SECRET, "admin-totp");
 
 function deviceHash(req) {
   const ua = req.headers["user-agent"] || "";
@@ -546,7 +500,7 @@ function seedAdmin() {
   const password = process.env.ADMIN_PASSWORD || (IS_PROD ? null : "DevOnly-ChangeMe!");
   if (!username || !password) throw new Error("ADMIN_USERNAME and ADMIN_PASSWORD are required before first production start");
   db.prepare("INSERT INTO admin_users (id, username, password_hash, totp_secret, role, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(id("adm"), username, hashPassword(password), process.env.ADMIN_TOTP_SECRET || null, "superadmin", nowIso());
+    .run(id("adm"), username, hashPassword(password), totpBox.encrypt(process.env.ADMIN_TOTP_SECRET || null), "superadmin", nowIso());
 }
 
 function base32Decode(input) {
@@ -612,11 +566,11 @@ function mintIdentity(req, res) {
 function requireIdentity(req, res) {
   const idn = getIdentity(req);
   if (!idn) {
-    json(res, 401, { error: "会话已失效，请刷新页面后重试。" });
+    json(res, 401, errorBody(req, "UNAUTHENTICATED", "会话已失效，请刷新页面后重试。"));
     return null;
   }
   if (req.method !== "GET" && req.headers["x-csrf-token"] !== idn.csrf_token) {
-    json(res, 403, { error: "请求校验失败，请刷新页面重试。" });
+    json(res, 403, errorBody(req, "CSRF_FAILED", "请求校验失败，请刷新页面重试。"));
     return null;
   }
   db.prepare("UPDATE identities SET last_seen_at = ? WHERE id = ?").run(nowIso(), idn.id);
@@ -627,22 +581,22 @@ function requireAdmin(req, res) {
   const cookies = parseCookies(req.headers.cookie);
   const value = cookies[ADMIN_SESSION_COOKIE];
   if (!value || !value.includes(".")) {
-    json(res, 401, { error: "请先登录管理员账号。" });
+    json(res, 401, errorBody(req, "ADMIN_UNAUTHENTICATED", "请先登录管理员账号。"));
     return null;
   }
   const [sid, raw] = value.split(".");
   const session = db.prepare("SELECT * FROM admin_sessions WHERE id = ?").get(sid);
   if (!session || new Date(session.expires_at).getTime() < nowMs() || !safeEqualHex(sha(raw), session.session_hash)) {
-    json(res, 401, { error: "请先登录管理员账号。" });
+    json(res, 401, errorBody(req, "ADMIN_UNAUTHENTICATED", "请先登录管理员账号。"));
     return null;
   }
   if (req.method !== "GET" && req.headers["x-csrf-token"] !== session.csrf_token) {
-    json(res, 403, { error: "请求校验失败，请刷新页面重试。" });
+    json(res, 403, errorBody(req, "CSRF_FAILED", "请求校验失败，请刷新页面重试。"));
     return null;
   }
   const admin = db.prepare("SELECT * FROM admin_users WHERE id = ? AND disabled = 0").get(session.admin_user_id);
   if (!admin) {
-    json(res, 401, { error: "管理员账号不可用。" });
+    json(res, 401, errorBody(req, "ADMIN_DISABLED", "管理员账号不可用。"));
     return null;
   }
   db.prepare("UPDATE admin_sessions SET last_seen_at = ? WHERE id = ?").run(nowIso(), session.id);
@@ -1880,16 +1834,26 @@ function writeNicknameReview(identityId, nickname, moderation) {
 // Static
 // ---------------------------------------------------------------------------
 
+// PERF: cache small static file buffers in memory so repeat requests avoid synchronous
+// filesystem syscalls on the event loop. Deploys replace the process (and its container),
+// so cached entries never go stale within a process lifetime.
+const STATIC_CACHE = new Map(); // filePath -> { body, mime, len }
+const STATIC_CACHE_MAX_FILE_BYTES = 512 * 1024;
+const STATIC_CACHE_MAX_ENTRIES = 512;
+
 function serveFile(res, filePath, cache = "public, max-age=3600", headOnly = false, extraHeaders = {}) {
-  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-    text(res, 404, "Not found");
-    return;
+  let entry = STATIC_CACHE.get(filePath);
+  if (!entry) {
+    let stat;
+    try { stat = fs.statSync(filePath); } catch { text(res, 404, "Not found"); return; }
+    if (!stat.isFile()) { text(res, 404, "Not found"); return; }
+    const body = fs.readFileSync(filePath);
+    entry = { body, mime: MIME[path.extname(filePath).toLowerCase()] || "application/octet-stream", len: body.length };
+    if (body.length <= STATIC_CACHE_MAX_FILE_BYTES && STATIC_CACHE.size < STATIC_CACHE_MAX_ENTRIES) STATIC_CACHE.set(filePath, entry);
   }
-  const ext = path.extname(filePath).toLowerCase();
-  const body = fs.readFileSync(filePath);
   res.writeHead(200, {
-    "Content-Type": MIME[ext] || "application/octet-stream",
-    "Content-Length": body.length,
+    "Content-Type": entry.mime,
+    "Content-Length": entry.len,
     "Cache-Control": cache,
     ...extraHeaders,
   });
@@ -1897,7 +1861,7 @@ function serveFile(res, filePath, cache = "public, max-age=3600", headOnly = fal
     res.end();
     return;
   }
-  res.end(body);
+  res.end(entry.body);
 }
 
 function staticCacheFor(filePath) {
@@ -2444,13 +2408,20 @@ async function handleAdminApi(req, res, url) {
       return json(res, 429, { error: "登录尝试过于频繁，请稍后再试。" }, { "Retry-After": String(accountLimit.retryAfterSeconds) });
     }
     const admin = db.prepare("SELECT * FROM admin_users WHERE username = ? AND disabled = 0").get(username);
-    const ok = admin && verifyPassword(password, admin.password_hash) && verifyTotp(admin.totp_secret, totp);
+    const ok = admin && verifyPassword(password, admin.password_hash) && verifyTotp(totpBox.decrypt(admin.totp_secret), totp);
     if (!ok) {
       const failureLimit = rateLimiter.consume([accountRule], CONFIG.adminLoginAccountWindowMinutes * 60);
       if (!failureLimit.allowed) {
         return json(res, 429, { error: "登录尝试过于频繁，请稍后再试。" }, { "Retry-After": String(failureLimit.retryAfterSeconds) });
       }
       return json(res, 401, { error: "管理员登录失败。" });
+    }
+    // SEC: opportunistically encrypt a legacy plaintext TOTP secret at rest on first
+    // successful login. Rollback-safe — the row is only rewritten to the encrypted form
+    // once the new code is confirmed serving, and decrypt() still accepts plaintext.
+    if (admin.totp_secret && !totpBox.isEncrypted(admin.totp_secret)) {
+      try { db.prepare("UPDATE admin_users SET totp_secret = ? WHERE id = ?").run(totpBox.encrypt(admin.totp_secret), admin.id); }
+      catch (err) { console.error("[secrets] totp re-encrypt failed", err.message); }
     }
     const raw = crypto.randomBytes(32).toString("hex");
     const sid = id("ases");
