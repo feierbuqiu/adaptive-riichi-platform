@@ -11,7 +11,11 @@ const { IS_PROD, CONFIG, SECRET } = require("./config");
 const { createJobLock } = require("./jobs");
 const { newRequestId, routeTemplate, accessLog } = require("./logging");
 const { createSecretBox } = require("./secrets");
-const { cookie, adminCookie, clearCookie, json, text, readJson, errorBody } = require("./http");
+const { createCrypto } = require("./crypto");
+const { createNet } = require("./net");
+const { verifyTotp } = require("./totp");
+const { norm, nonempty, pairKey, sqlPlaceholders, parseJsonSafe } = require("./util");
+const { parseCookies, cookie, adminCookie, clearCookie, json, text, readJson, errorBody } = require("./http");
 const {
   FixedWindowRateLimiter,
   clusterCandidatePairs,
@@ -60,96 +64,10 @@ function nowMs() {
   return Date.now();
 }
 
-function id(prefix) {
-  return `${prefix}_${crypto.randomBytes(16).toString("hex")}`;
-}
-
-function hmac(value, secret = SECRET) {
-  return crypto.createHmac("sha256", secret).update(String(value)).digest("hex");
-}
-
-function sha(value) {
-  return crypto.createHash("sha256").update(String(value)).digest("hex");
-}
-
-function safeEqualHex(a, b) {
-  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
-}
-
-function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
-  const derived = crypto.scryptSync(String(password), salt, 64).toString("hex");
-  return `scrypt$${salt}$${derived}`;
-}
-
-function verifyPassword(password, stored) {
-  if (!stored || !stored.startsWith("scrypt$")) return false;
-  const [, salt, hash] = stored.split("$");
-  const derived = crypto.scryptSync(String(password), salt, 64);
-  return crypto.timingSafeEqual(Buffer.from(hash, "hex"), derived);
-}
-
-function parseCookies(header) {
-  const out = {};
-  if (!header) return out;
-  for (const part of header.split(";")) {
-    const idx = part.indexOf("=");
-    if (idx === -1) continue;
-    out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
-  }
-  return out;
-}
-
-// HTTP response, cookie, and body helpers now live in ./http (imported at the top).
+// Crypto, network, and at-rest-secret helpers now live in dedicated modules.
+const { hmac, sha, safeEqualHex, hashPassword, verifyPassword, id } = createCrypto(SECRET);
+const { clientIp, ipPrefixOf, parseUserAgent, deviceHash } = createNet({ sha, secret: SECRET });
 const totpBox = createSecretBox(SECRET, "admin-totp");
-
-function deviceHash(req) {
-  const ua = req.headers["user-agent"] || "";
-  const lang = req.headers["accept-language"] || "";
-  const ch = req.headers["sec-ch-ua"] || "";
-  const ip = clientIp(req);
-  const ipPrefix = ip.includes(":") ? ip.split(":").slice(0, 4).join(":") : ip.split(".").slice(0, 3).join(".");
-  return sha(`${ua}|${lang}|${ch}|${ipPrefix}|${SECRET}`);
-}
-
-function clientIp(req) {
-  const cf = req.headers["cf-connecting-ip"];
-  if (cf) return String(cf).trim();
-  const real = req.headers["x-real-ip"];
-  if (real) return String(real).trim();
-  const xff = req.headers["x-forwarded-for"];
-  if (xff) return String(xff).split(",")[0].trim();
-  return req.socket.remoteAddress || "";
-}
-
-function ipPrefixOf(ip) {
-  if (!ip) return "";
-  return ip.includes(":") ? ip.split(":").slice(0, 4).join(":") : ip.split(".").slice(0, 3).join(".");
-}
-
-function parseUserAgent(ua) {
-  const s = String(ua || "");
-  const low = s.toLowerCase();
-  const mobile = /android|iphone|ipad|ipod|mobile|micromessenger/.test(low);
-  let os = "Unknown";
-  if (/windows nt/.test(low)) os = "Windows";
-  else if (/iphone|ipad|ipod/.test(low)) os = "iOS";
-  else if (/mac os x/.test(low)) os = "macOS";
-  else if (/android/.test(low)) os = "Android";
-  else if (/linux/.test(low)) os = "Linux";
-  let browser = "Unknown";
-  if (low.includes("micromessenger")) browser = "WeChat";
-  else if (low.includes("mqqbrowser") || low.includes("qqbrowser")) browser = "QQBrowser";
-  else if (low.includes("ucbrowser")) browser = "UC";
-  else if (low.includes("quark")) browser = "Quark";
-  else if (low.includes("edg/") || low.includes("edgios/")) browser = "Edge";
-  else if (low.includes("crios/")) browser = "Chrome";
-  else if (low.includes("fxios/") || low.includes("firefox/")) browser = "Firefox";
-  else if (low.includes("chrome/")) browser = "Chrome";
-  else if (low.includes("safari/")) browser = "Safari";
-  const device = mobile ? (/ipad|tablet/.test(low) ? "tablet" : "phone") : "desktop";
-  return { browser, os, device, mobile };
-}
 
 function captureServerFingerprint(req, identityId, attemptId) {
   const ip = clientIp(req);
@@ -503,35 +421,7 @@ function seedAdmin() {
     .run(id("adm"), username, hashPassword(password), totpBox.encrypt(process.env.ADMIN_TOTP_SECRET || null), "superadmin", nowIso());
 }
 
-function base32Decode(input) {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const clean = String(input || "").replace(/=+$/g, "").replace(/\s+/g, "").toUpperCase();
-  let bits = "";
-  for (const ch of clean) {
-    const val = alphabet.indexOf(ch);
-    if (val < 0) continue;
-    bits += val.toString(2).padStart(5, "0");
-  }
-  const out = [];
-  for (let i = 0; i + 8 <= bits.length; i += 8) out.push(parseInt(bits.slice(i, i + 8), 2));
-  return Buffer.from(out);
-}
-
-function verifyTotp(secret, token) {
-  if (!secret) return !IS_PROD;
-  if (!/^\d{6}$/.test(String(token || ""))) return false;
-  const key = base32Decode(secret);
-  const step = Math.floor(Date.now() / 30000);
-  for (const offset of [-1, 0, 1]) {
-    const buf = Buffer.alloc(8);
-    buf.writeBigUInt64BE(BigInt(step + offset));
-    const h = crypto.createHmac("sha1", key).update(buf).digest();
-    const pos = h[h.length - 1] & 0xf;
-    const code = ((h.readUInt32BE(pos) & 0x7fffffff) % 1000000).toString().padStart(6, "0");
-    if (crypto.timingSafeEqual(Buffer.from(code), Buffer.from(String(token)))) return true;
-  }
-  return false;
-}
+// TOTP verification lives in ./totp (imported above).
 
 // ---------------------------------------------------------------------------
 // Identity (codeless soft identity)
@@ -983,27 +873,7 @@ function nextOrFinish(attemptId) {
 // Same-person clustering
 // ---------------------------------------------------------------------------
 
-function norm(value) {
-  return String(value ?? "").trim().toLowerCase();
-}
-
-function nonempty(value) {
-  const s = norm(value);
-  return s ? s : null;
-}
-
-function pairKey(a, b) {
-  return [a, b].sort().join("|");
-}
-
-function sqlPlaceholders(values) {
-  return values.map(() => "?").join(", ");
-}
-
-function parseJsonSafe(raw, fallback = null) {
-  if (!raw) return fallback;
-  try { return JSON.parse(raw); } catch { return fallback; }
-}
+// Small pure helpers live in ./util (imported above).
 
 function latestFingerprintSignals() {
   const identities = db.prepare("SELECT * FROM identities ORDER BY created_at").all();

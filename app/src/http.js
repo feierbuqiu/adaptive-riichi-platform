@@ -6,6 +6,17 @@
 
 const { IS_PROD } = require("./config");
 
+function parseCookies(header) {
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return out;
+}
+
 function cookie(name, value, options = {}) {
   const parts = [`${name}=${encodeURIComponent(value)}`, "Path=/", "HttpOnly", "SameSite=Lax"];
   if (IS_PROD || options.secure) parts.push("Secure");
@@ -61,4 +72,4 @@ function errorBody(req, code, message, extra = {}) {
   return { error: message, code, requestId: req?.id, ...extra };
 }
 
-module.exports = { cookie, adminCookie, clearCookie, json, text, readJson, errorBody };
+module.exports = { parseCookies, cookie, adminCookie, clearCookie, json, text, readJson, errorBody };
