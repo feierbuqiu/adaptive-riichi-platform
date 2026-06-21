@@ -433,9 +433,102 @@
     } catch (err) { $("#adminLoginMsg").textContent = err.message; $("#adminLoginMsg").className = "message is-error"; }
   }
 
+  // ---------- Passkey / 恢复码 ----------
+  function b64urlToBuf(s) {
+    const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4);
+    const bin = atob(b64); const u = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) u[i] = bin.charCodeAt(i);
+    return u.buffer;
+  }
+  function bufToB64url(buf) {
+    const u = new Uint8Array(buf); let bin = "";
+    for (let i = 0; i < u.length; i += 1) bin += String.fromCharCode(u[i]);
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  async function startRegistration(options) {
+    const publicKey = {
+      ...options,
+      challenge: b64urlToBuf(options.challenge),
+      user: { ...options.user, id: b64urlToBuf(options.user.id) },
+      excludeCredentials: (options.excludeCredentials || []).map((c) => ({ ...c, id: b64urlToBuf(c.id) })),
+    };
+    const cred = await navigator.credentials.create({ publicKey });
+    const r = cred.response;
+    return {
+      id: cred.id, rawId: bufToB64url(cred.rawId), type: cred.type,
+      response: { clientDataJSON: bufToB64url(r.clientDataJSON), attestationObject: bufToB64url(r.attestationObject), transports: r.getTransports ? r.getTransports() : [] },
+      clientExtensionResults: cred.getClientExtensionResults(),
+    };
+  }
+  async function startAuthentication(options) {
+    const publicKey = {
+      ...options,
+      challenge: b64urlToBuf(options.challenge),
+      allowCredentials: (options.allowCredentials || []).map((c) => ({ ...c, id: b64urlToBuf(c.id) })),
+    };
+    const cred = await navigator.credentials.get({ publicKey });
+    const r = cred.response;
+    return {
+      id: cred.id, rawId: bufToB64url(cred.rawId), type: cred.type,
+      response: { clientDataJSON: bufToB64url(r.clientDataJSON), authenticatorData: bufToB64url(r.authenticatorData), signature: bufToB64url(r.signature), userHandle: r.userHandle ? bufToB64url(r.userHandle) : null },
+      clientExtensionResults: cred.getClientExtensionResults(),
+    };
+  }
+  function loginError(msg) { $("#adminLoginMsg").textContent = msg; $("#adminLoginMsg").className = "message is-error"; }
+  async function passkeyLogin() {
+    if (!window.PublicKeyCredential) return loginError("此浏览器不支持 Passkey。");
+    try {
+      const init = await api("/api/admin/webauthn/login/options", { method: "POST", body: {} });
+      const response = await startAuthentication(init.options);
+      const r = await api("/api/admin/webauthn/login/verify", { method: "POST", body: { challengeId: init.challengeId, response } });
+      state.csrf = r.csrf; await afterLogin();
+    } catch (err) { loginError("Passkey 登录失败：" + err.message); }
+  }
+  async function recoveryLogin(e) {
+    e.preventDefault();
+    try {
+      const r = await api("/api/admin/login/recovery", { method: "POST", body: { username: $("#recoveryUsername").value.trim(), code: $("#recoveryCode").value.trim() } });
+      state.csrf = r.csrf; await afterLogin();
+    } catch (err) { loginError(err.message); }
+  }
+  async function enrollPasskey() {
+    if (!window.PublicKeyCredential) return toast("此浏览器不支持 Passkey", "error");
+    const label = await modal({ title: "绑定 Passkey", text: "给这把 Passkey 起个名字（如：台式机 Windows Hello）", input: true, placeholder: "台式机", okText: "继续" });
+    if (label === null) return;
+    const init = await api("/api/admin/webauthn/register/options", { method: "POST", body: {} });
+    const response = await startRegistration(init.options);
+    await api("/api/admin/webauthn/register/verify", { method: "POST", body: { challengeId: init.challengeId, response, label } });
+    toast("Passkey 已绑定", "ok"); loadSecurity();
+  }
+  async function genRecovery() {
+    if (!(await modal({ title: "生成恢复码", text: "将作废现有未使用的恢复码并生成新的一组。请立即抄好新码。", okText: "生成" }))) return;
+    const r = await api("/api/admin/recovery/generate", { method: "POST", body: {} });
+    const box = $("#recoveryCodesBox"); box.hidden = false;
+    box.innerHTML = '<p class="muted-line"><strong>请立即抄下这些恢复码（仅显示这一次）：</strong></p><ol class="recovery-codes">' + r.codes.map((c) => "<li><code>" + esc(c) + "</code></li>").join("") + "</ol>";
+    loadSecurity();
+  }
+  async function loadSecurity() {
+    const s = await api("/api/admin/security");
+    const list = $("#passkeyList");
+    list.innerHTML = s.passkeys.length
+      ? '<table><thead><tr><th>名称</th><th>绑定时间</th><th>最近使用</th><th>操作</th></tr></thead><tbody>' + s.passkeys.map((p) => "<tr><td>" + esc(p.label || "未命名") + "</td><td>" + esc(fmtDate(p.createdAt)) + "</td><td>" + esc(fmtDate(p.lastUsedAt)) + '</td><td><button class="mini-btn" data-del-passkey="' + esc(p.id) + '">删除</button></td></tr>').join("") + "</tbody></table>"
+      : '<p class="message">尚未绑定任何 Passkey。建议先绑定一把，再生成恢复码。</p>';
+    list.querySelectorAll("button[data-del-passkey]").forEach((b) => b.addEventListener("click", guard(async () => {
+      if (!(await modal({ title: "删除 Passkey", text: "确定删除这把 Passkey？", okText: "删除" }))) return;
+      await api("/api/admin/webauthn/credentials/delete", { method: "POST", body: { id: b.dataset.delPasskey } }); toast("已删除", "ok"); loadSecurity();
+    })));
+    $("#recoveryRemaining").textContent = "剩余可用恢复码：" + s.recoveryCodesRemaining + " 个";
+  }
+
   document.querySelectorAll(".admin-tab").forEach((b) => b.addEventListener("click", () => activateTab(b.dataset.tab)));
   $("#adminLoginForm").addEventListener("submit", login);
   $("#adminLogoutBtn").addEventListener("click", guard(async () => { await api("/api/admin/logout", { method: "POST", body: {} }); location.reload(); }));
+  $("#adminPasskeyBtn").addEventListener("click", passkeyLogin);
+  $("#adminRecoveryToggle").addEventListener("click", () => { const f = $("#adminRecoveryForm"); f.hidden = !f.hidden; });
+  $("#adminRecoveryForm").addEventListener("submit", recoveryLogin);
+  $("#enrollPasskeyBtn").addEventListener("click", guard(enrollPasskey));
+  $("#genRecoveryBtn").addEventListener("click", guard(genRecovery));
+  document.querySelector('.admin-tab[data-tab="security"]').addEventListener("click", () => guard(loadSecurity)());
   $("#refreshAdminBtn").addEventListener("click", guard(loadAttempts));
   $("#attemptSearch").addEventListener("input", (e) => { state.attemptFilter = e.target.value; state.attemptPage = 0; renderAttempts(); });
   let practiceUserSearchTimer;

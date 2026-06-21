@@ -7,7 +7,9 @@ ENV PORT=3000
 ENV SOURCE_ROOT=/opt/adaptive-test-source
 ENV DB_PATH=/var/lib/adaptive-test/app.sqlite
 
-COPY package.json ./
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
 COPY src ./src
 COPY public ./public
 COPY scripts ./scripts

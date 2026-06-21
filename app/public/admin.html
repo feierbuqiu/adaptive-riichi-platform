@@ -22,6 +22,15 @@
           <button class="primary-btn" type="submit">登录</button>
           <p id="adminLoginMsg" class="message"></p>
         </form>
+        <div class="action-row" style="flex-direction:column;gap:8px;margin-top:8px;">
+          <button id="adminPasskeyBtn" class="primary-btn" type="button">用 Passkey 登录</button>
+          <button id="adminRecoveryToggle" class="ghost-btn" type="button">用恢复码登录</button>
+        </div>
+        <form id="adminRecoveryForm" class="panel form-panel" hidden style="margin-top:8px;">
+          <label>用户名<input id="recoveryUsername" autocomplete="username" /></label>
+          <label>恢复码<input id="recoveryCode" autocomplete="one-time-code" placeholder="xxxx-xxxx-xxxx-xxxx" /></label>
+          <button class="primary-btn" type="submit">用恢复码登录</button>
+        </form>
       </section>
 
       <section id="adminView" class="screen">
@@ -41,6 +50,7 @@
           <button class="admin-tab" data-tab="exam" type="button">自适应考试</button>
           <button class="admin-tab" data-tab="identities" type="button">用户管理</button>
           <button class="admin-tab" data-tab="anticheat" type="button">反作弊</button>
+          <button class="admin-tab" data-tab="security" type="button">安全</button>
         </nav>
 
         <!-- 总览 -->
@@ -179,6 +189,27 @@
             <div id="suspiciousTable" class="table-wrap"></div>
           </div>
         </section>
+
+        <!-- 安全 -->
+        <section class="admin-pane" data-pane="security">
+          <div class="panel admin-panel">
+            <div class="panel-head">
+              <h2>Passkey（通行密钥）</h2>
+              <button id="enrollPasskeyBtn" class="primary-btn" type="button">绑定本设备 Passkey</button>
+            </div>
+            <p class="muted-line">用本机 Windows Hello / Touch ID 绑定 Passkey，之后一键登录，无需密码或验证码。建议至少绑定两把（如台式机 + 手机）。</p>
+            <div id="passkeyList" class="table-wrap"></div>
+          </div>
+          <div class="panel admin-panel">
+            <div class="panel-head">
+              <h2>恢复码</h2>
+              <button id="genRecoveryBtn" class="ghost-btn" type="button">生成新的恢复码</button>
+            </div>
+            <p class="muted-line">所有设备都不可用时用恢复码登录。每个码只能用一次；重新生成会作废旧码。<strong>生成后请立即抄到安全的地方。</strong></p>
+            <p id="recoveryRemaining" class="muted-line"></p>
+            <div id="recoveryCodesBox" class="detail-box" hidden></div>
+          </div>
+        </section>
       </section>
     </main>
 
@@ -196,6 +227,6 @@
     </div>
 
     <script src="/practice-tiles.js?v=20260619-admin-v2"></script>
-    <script src="/admin.js?v=20260619-admin-v2"></script>
+    <script src="/admin.js?v=20260621-passkey-v1"></script>
   </body>
 </html>

@@ -11,6 +11,7 @@ const { IS_PROD, CONFIG, SECRET } = require("./config");
 const { createJobLock } = require("./jobs");
 const { newRequestId, routeTemplate, accessLog } = require("./logging");
 const { createSecretBox } = require("./secrets");
+const { createWebauthn } = require("./webauthn");
 const { createCrypto } = require("./crypto");
 const { createNet } = require("./net");
 const { verifyTotp } = require("./totp");
@@ -68,6 +69,8 @@ function nowMs() {
 const { hmac, sha, safeEqualHex, hashPassword, verifyPassword, id } = createCrypto(SECRET);
 const { clientIp, ipPrefixOf, parseUserAgent, deviceHash } = createNet({ sha, secret: SECRET });
 const totpBox = createSecretBox(SECRET, "admin-totp");
+// webauthnService is created after initSchema() so its prepared statements see the tables.
+let webauthnService = null;
 
 function captureServerFingerprint(req, identityId, attemptId) {
   const ip = clientIp(req);
@@ -355,7 +358,7 @@ function initSchema() {
   // (migrations/001_core.sql). Every statement is idempotent, so on the existing
   // production database this only records the baseline in schema_migrations without
   // altering any data.
-  runMigrations(db, { dir: MIGRATIONS_DIR, ids: ["001_core.sql", "003_observability.sql"] });
+  runMigrations(db, { dir: MIGRATIONS_DIR, ids: ["001_core.sql", "003_observability.sql", "004_webauthn.sql"] });
   // Idempotent legacy data backfill for databases created before the migration baseline.
   // No-op on fresh databases and on current production; retained as a safety net until a
   // destructive-migration drill retires it.
@@ -2254,6 +2257,22 @@ async function handleUserApi(req, res, url) {
 // Admin API
 // ---------------------------------------------------------------------------
 
+// Issues an administrator session after any successful login factor (password+TOTP,
+// passkey, or recovery code). Long-lived so the same device stays logged in; re-auth is a
+// single passkey tap.
+function issueAdminSession(req, res, admin, method) {
+  const raw = crypto.randomBytes(32).toString("hex");
+  const sid = id("ases");
+  const csrf = crypto.randomBytes(24).toString("hex");
+  const maxAge = 60 * 60 * 24 * CONFIG.adminSessionDays;
+  const expires = new Date(nowMs() + maxAge * 1000).toISOString();
+  db.prepare("INSERT INTO admin_sessions (id, admin_user_id, session_hash, csrf_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(sid, admin.id, sha(raw), csrf, nowIso(), expires, nowIso());
+  db.prepare("INSERT INTO audit_logs (id, actor_type, actor_id, action, target_type, target_id, details_json, created_at) VALUES (?, 'admin', ?, 'admin_login', 'admin_session', ?, ?, ?)")
+    .run(id("aud"), admin.id, sid, JSON.stringify({ method, ipPrefixHash: hmac(ipPrefixOf(clientIp(req))) }), nowIso());
+  return json(res, 200, { loggedIn: true, csrf }, { "Set-Cookie": adminCookie(ADMIN_SESSION_COOKIE, `${sid}.${raw}`, { maxAge }) });
+}
+
 async function handleAdminApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/admin/me") {
     const session = getAdminSession(req);
@@ -2293,15 +2312,40 @@ async function handleAdminApi(req, res, url) {
       try { db.prepare("UPDATE admin_users SET totp_secret = ? WHERE id = ?").run(totpBox.encrypt(admin.totp_secret), admin.id); }
       catch (err) { console.error("[secrets] totp re-encrypt failed", err.message); }
     }
-    const raw = crypto.randomBytes(32).toString("hex");
-    const sid = id("ases");
-    const csrf = crypto.randomBytes(24).toString("hex");
-    const expires = new Date(nowMs() + 1000 * 60 * 60 * 8).toISOString();
-    db.prepare("INSERT INTO admin_sessions (id, admin_user_id, session_hash, csrf_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run(sid, admin.id, sha(raw), csrf, nowIso(), expires, nowIso());
-    db.prepare("INSERT INTO audit_logs (id, actor_type, actor_id, action, target_type, target_id, details_json, created_at) VALUES (?, 'admin', ?, 'admin_login', 'admin_session', ?, ?, ?)")
-      .run(id("aud"), admin.id, sid, JSON.stringify({ ipPrefixHash: hmac(ipPrefixOf(clientIp(req))) }), nowIso());
-    return json(res, 200, { loggedIn: true, csrf }, { "Set-Cookie": adminCookie(ADMIN_SESSION_COOKIE, `${sid}.${raw}`, { maxAge: 60 * 60 * 8 }) });
+    return issueAdminSession(req, res, admin, "password");
+  }
+  if (req.method === "POST" && url.pathname === "/api/admin/webauthn/login/options") {
+    const limited = checkRateLimit(req, "admin_login", 20, 300);
+    if (!limited.allowed) return json(res, 429, errorBody(req, "RATE_LIMITED", "请求过于频繁，请稍后再试。"), { "Retry-After": String(limited.retryAfterSeconds) });
+    if (!webauthnService.hasCredentials()) return json(res, 400, errorBody(req, "NO_PASSKEY", "尚未注册 Passkey。"));
+    const { options, challengeId } = await webauthnService.authenticationOptions();
+    return json(res, 200, { options, challengeId });
+  }
+  if (req.method === "POST" && url.pathname === "/api/admin/webauthn/login/verify") {
+    const limited = checkRateLimit(req, "admin_login", 20, 300);
+    if (!limited.allowed) return json(res, 429, errorBody(req, "RATE_LIMITED", "请求过于频繁，请稍后再试。"), { "Retry-After": String(limited.retryAfterSeconds) });
+    const body = await readJson(req);
+    const result = await webauthnService.verifyAuthentication(body.challengeId, body.response);
+    if (!result.ok) return json(res, 401, errorBody(req, "PASSKEY_FAILED", "Passkey 登录失败。"));
+    const admin = db.prepare("SELECT * FROM admin_users WHERE id = ? AND disabled = 0").get(result.adminUserId);
+    if (!admin) return json(res, 401, errorBody(req, "ADMIN_DISABLED", "管理员账号不可用。"));
+    return issueAdminSession(req, res, admin, "passkey");
+  }
+  if (req.method === "POST" && url.pathname === "/api/admin/login/recovery") {
+    const limited = checkRateLimit(req, "admin_login", 8, 300);
+    if (!limited.allowed) return json(res, 429, errorBody(req, "RATE_LIMITED", "登录尝试过于频繁，请稍后再试。"), { "Retry-After": String(limited.retryAfterSeconds) });
+    const body = await readJson(req);
+    const username = typeof body.username === "string" ? body.username.trim() : "";
+    const code = typeof body.code === "string" ? body.code : "";
+    if (!username || username.length > 128 || code.length > 64) return json(res, 400, errorBody(req, "BAD_INPUT", "参数无效。"));
+    const accountRule = adminLoginAccountRule(username);
+    if (!rateLimiter.check([accountRule]).allowed) return json(res, 429, errorBody(req, "RATE_LIMITED", "登录尝试过于频繁，请稍后再试。"));
+    const admin = db.prepare("SELECT * FROM admin_users WHERE username = ? AND disabled = 0").get(username);
+    if (!(admin && webauthnService.verifyRecoveryCode(admin.id, code))) {
+      rateLimiter.consume([accountRule], CONFIG.adminLoginAccountWindowMinutes * 60);
+      return json(res, 401, errorBody(req, "RECOVERY_FAILED", "恢复码无效或已用过。"));
+    }
+    return issueAdminSession(req, res, admin, "recovery");
   }
   if (req.method === "POST" && url.pathname === "/api/admin/logout") {
     const admin = requireAdmin(req, res);
@@ -2313,6 +2357,35 @@ async function handleAdminApi(req, res, url) {
   const admin = requireAdmin(req, res);
   if (!admin) return;
   const csrf = admin.__session.csrf_token;
+
+  if (req.method === "GET" && url.pathname === "/api/admin/security") {
+    return json(res, 200, {
+      csrf,
+      passkeys: webauthnService.credsFor(admin.id).map((c) => ({ id: c.id, label: c.device_label, createdAt: c.created_at, lastUsedAt: c.last_used_at })),
+      recoveryCodesRemaining: webauthnService.recoveryCodesRemaining(admin.id),
+    });
+  }
+  if (req.method === "POST" && url.pathname === "/api/admin/webauthn/register/options") {
+    const { options, challengeId } = await webauthnService.registrationOptions(admin);
+    return json(res, 200, { options, challengeId, csrf });
+  }
+  if (req.method === "POST" && url.pathname === "/api/admin/webauthn/register/verify") {
+    const body = await readJson(req);
+    const result = await webauthnService.verifyRegistration(admin, body.challengeId, body.response, body.label);
+    if (!result.ok) return json(res, 400, errorBody(req, "PASSKEY_REGISTER_FAILED", result.error || "Passkey 注册失败。"));
+    db.prepare("INSERT INTO audit_logs (id, actor_type, actor_id, action, target_type, created_at) VALUES (?, 'admin', ?, 'passkey_register', 'webauthn_credential', ?)").run(id("aud"), admin.id, nowIso());
+    return json(res, 200, { ok: true, csrf });
+  }
+  if (req.method === "POST" && url.pathname === "/api/admin/webauthn/credentials/delete") {
+    const body = await readJson(req);
+    db.prepare("DELETE FROM webauthn_credentials WHERE id = ? AND admin_user_id = ?").run(String(body.id || ""), admin.id);
+    return json(res, 200, { ok: true, csrf });
+  }
+  if (req.method === "POST" && url.pathname === "/api/admin/recovery/generate") {
+    const codes = webauthnService.generateRecoveryCodes(admin.id);
+    db.prepare("INSERT INTO audit_logs (id, actor_type, actor_id, action, target_type, created_at) VALUES (?, 'admin', ?, 'recovery_codes_generate', 'admin_user', ?)").run(id("aud"), admin.id, nowIso());
+    return json(res, 200, { codes, csrf });
+  }
 
   if (practiceService) {
     const practiceHandled = await practiceService.handleAdminApi(req, res, url, admin, csrf);
@@ -2817,6 +2890,7 @@ async function router(req, res) {
 initSchema();
 importQuestionBank();
 seedAdmin();
+webauthnService = createWebauthn({ db, config: CONFIG, id, sha, hmac, nowIso, nowMs });
 practiceService = createPracticeService({
   db,
   sourceRoot: SOURCE_ROOT,
@@ -2942,3 +3016,4 @@ setInterval(() => { if (isBackgroundLeader()) sweepActiveAttempts(); }, CONFIG.s
 setInterval(pruneRateLimitBuckets, 60 * 1000);    // SEC-003：定期清理过期限流桶
 setInterval(() => { if (isBackgroundLeader()) processClusterRebuildJob(); }, 30 * 1000); // PERF-001：合并执行后台聚类重建
 setInterval(pruneRumEvents, 6 * 60 * 60 * 1000);  // OPS-005：定期清理过期 RUM 遥测
+setInterval(() => webauthnService.pruneChallenges(), 5 * 60 * 1000); // 清理过期 WebAuthn 挑战

@@ -32,6 +32,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+      - name: Install dependencies
+        run: npm ci
       - name: Syntax check
         run: npm run check
       - name: Migration check (fresh database builds and is idempotent)

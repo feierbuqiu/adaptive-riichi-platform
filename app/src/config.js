@@ -56,6 +56,14 @@ const CONFIG = {
   tencentTmsBizType: process.env.TENCENT_TMS_BIZ_TYPE || "nickname_input",
   tencentTmsEndpoint: process.env.TENCENT_TMS_ENDPOINT || "tms.tencentcloudapi.com",
   tencentTmsTimeoutMs: Number(process.env.TENCENT_TMS_TIMEOUT_MS) || 3000,
+  // Admin passkey (WebAuthn). rpId must be a registrable suffix of every admin origin.
+  webauthnRpId: process.env.WEBAUTHN_RP_ID || envList("ADMIN_HOSTNAMES", "admin.localhost")[0] || "localhost",
+  webauthnRpName: process.env.WEBAUTHN_RP_NAME || "Adaptive Riichi Admin",
+  webauthnOrigins: process.env.WEBAUTHN_ORIGINS
+    ? envList("WEBAUTHN_ORIGINS", "")
+    : envList("ADMIN_HOSTNAMES", "admin.localhost").map((h) => `${IS_PROD ? "https" : "http"}://${h}`),
+  adminSessionDays: Number(process.env.ADMIN_SESSION_DAYS) || 60,
+  adminRecoveryCodeCount: Number(process.env.ADMIN_RECOVERY_CODE_COUNT) || 10,
 };
 
 const SECRET = process.env.SESSION_SECRET || (IS_PROD ? "" : "dev-session-secret-change-me");
