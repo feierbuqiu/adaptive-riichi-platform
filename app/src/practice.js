@@ -360,22 +360,33 @@ function createPracticeService(options) {
     });
     const countTop = ranking.countRows.slice(0, topN).map((row) => shape(row, "count"));
     const accuracyTop = ranking.accuracyRows.slice(0, topN).map((row) => shape(row, "accuracy"));
-    const youBase = ranking.rows.find((row) => row.identityId === identityId) || { answered: 0, correct: 0, accuracy: 0 };
     const countRow = ranking.countRows.find((row) => row.identityId === identityId);
     const accuracyRow = ranking.accuracyRows.find((row) => row.identityId === identityId);
+    const me = db.prepare("SELECT excluded_from_board FROM identities WHERE id = ?").get(identityId);
+    const boardExcluded = Boolean(me && me.excluded_from_board);
+    // Real progress for this user, independent of board exclusion. rankingRows() drops
+    // excluded users, so without this an excluded user would always read "0 answered →
+    // answer 20 more" no matter how much they have actually done.
+    const real = db.prepare(
+      "SELECT COUNT(*) AS answered, COALESCE(SUM(correct), 0) AS correct FROM practice_responses WHERE identity_id = ? AND bank_id = ? AND bank_version = ?",
+    ).get(identityId, currentBank.id, currentBank.version);
+    const realAnswered = Number(real.answered);
+    const realCorrect = Number(real.correct);
     return {
       countTop,
       accuracyTop,
       totalParticipants: ranking.rows.length,
       totalAccuracyRanked: ranking.accuracyRows.length,
       you: {
-        answered: youBase.answered,
-        correct: youBase.correct,
-        accuracy: Math.round(youBase.accuracy * 10000) / 100,
+        answered: realAnswered,
+        correct: realCorrect,
+        accuracy: realAnswered ? Math.round((realCorrect / realAnswered) * 10000) / 100 : 0,
         countRank: countRow ? countRow.countRank : null,
         accuracyRank: accuracyRow ? accuracyRow.accuracyRank : null,
-        accuracyRankEligible: youBase.answered >= MIN_ACCURACY_RANK_ANSWERS,
-        answersUntilAccuracyRank: Math.max(0, MIN_ACCURACY_RANK_ANSWERS - youBase.answered),
+        // An admin-excluded user is never "eligible"; do not dangle the 20-question carrot.
+        accuracyRankEligible: !boardExcluded && realAnswered >= MIN_ACCURACY_RANK_ANSWERS,
+        answersUntilAccuracyRank: Math.max(0, MIN_ACCURACY_RANK_ANSWERS - realAnswered),
+        boardExcluded,
       },
     };
   }

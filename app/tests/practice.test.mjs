@@ -139,6 +139,14 @@ test("configured bank imports its eligible questions and hidden cohort", () => {
   const responsePage = service.adminPracticeResponses("a", { page: 1, pageSize: 10 });
   assert.equal(responsePage.total, 20);
   assert.equal(responsePage.responses.length, 10);
+  // An admin-excluded user must not see the "answer 20 more to rank" carrot, and must
+  // still see their real answered count (not 0 from being filtered out of the ranking).
+  db.prepare("UPDATE identities SET excluded_from_board = 1 WHERE id = 'a'").run();
+  const excluded = service.publicRanking("a", 10);
+  assert.equal(excluded.you.boardExcluded, true);
+  assert.equal(excluded.you.accuracyRankEligible, false);
+  assert.equal(excluded.you.answered, 20);
+  assert.equal(excluded.you.answersUntilAccuracyRank, 0);
   db.close();
   fs.rmSync(dbPath, { force: true });
   fs.rmSync(bankRoot, { recursive: true, force: true });

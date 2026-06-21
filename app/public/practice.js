@@ -186,10 +186,15 @@
     els.progress.textContent = stats.roundAnswered + " / " + stats.totalQuestions;
     els.accuracy.textContent = stats.lifetimeAnswered ? stats.accuracy.toFixed(2).replace(/\.00$/, "") + "%" : "—";
     const you = ranking && ranking.you;
-    els.countRank.textContent = you && you.countRank ? "第 " + you.countRank + " 名" : (you ? "再答 " + you.answersUntilAccuracyRank + " 题入榜" : "—");
-    els.accuracyRank.textContent = you && you.accuracyRankEligible
-      ? "第 " + you.accuracyRank + " 名"
-      : (you ? "再答 " + you.answersUntilAccuracyRank + " 题入榜" : "完成20题后入榜");
+    if (you && you.boardExcluded) {
+      els.countRank.textContent = "暂不参与排行";
+      els.accuracyRank.textContent = "暂不参与排行";
+    } else {
+      els.countRank.textContent = you && you.countRank ? "第 " + you.countRank + " 名" : (you ? "再答 " + you.answersUntilAccuracyRank + " 题入榜" : "—");
+      els.accuracyRank.textContent = you && you.accuracyRankEligible
+        ? "第 " + you.accuracyRank + " 名"
+        : (you ? "再答 " + you.answersUntilAccuracyRank + " 题入榜" : "完成20题后入榜");
+    }
   }
 
   function boardRows(container, rows, type) {
